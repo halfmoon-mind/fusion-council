@@ -1,0 +1,12 @@
+{
+  "name": "fusion-council",
+  "description": "Deterministic multi-model planning & review councils for Claude Code (Claude role panel + GPT-5.5).",
+  "owner": { "name": "fusion-council" },
+  "plugins": [
+    {
+      "name": "fusion-council",
+      "source": ".",
+      "description": "Deterministic multi-model planning & review councils (Claude role panel + GPT-5.5)."
+    }
+  ]
+}
