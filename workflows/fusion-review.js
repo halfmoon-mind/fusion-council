@@ -32,13 +32,16 @@ const JUDGE_SCHEMA = {
   },
 }
 
+// </dev/null is REQUIRED: codex exec waits for stdin EOF ("Reading additional input from stdin...")
+// even with a prompt arg, so an open-pipe stdin (e.g. when a long xhigh run gets backgrounded) hangs
+// it forever and -o "$OUT" is never written. Closing stdin makes the seat deterministic.
 const codexRun = (prompt) => () =>
   agent(
     `Use the local Codex CLI to review the diff below as an independent senior engineer, then return ` +
       `ONLY Codex's final answer verbatim — no preamble of your own.\n` +
       `Run it non-interactively and read-only. Use exactly:\n` +
       `  OUT=$(mktemp); codex exec -s read-only --skip-git-repo-check -m ${codexModel} ` +
-      `-c model_reasoning_effort="${codexEffort}" -o "$OUT" "<the prompt>"; cat "$OUT"; rm -f "$OUT"\n\n` +
+      `-c model_reasoning_effort="${codexEffort}" -o "$OUT" "<the prompt>" </dev/null; cat "$OUT"; rm -f "$OUT"\n\n` +
       `Pass this as the prompt, and have Codex report: correctness/regression risks, hidden coupling, ` +
       `overengineering, missing tests, and anything outside the change's scope.\n\n${prompt}`,
     { phase: 'Panel', label: `panel:gpt-${codexModel}` }

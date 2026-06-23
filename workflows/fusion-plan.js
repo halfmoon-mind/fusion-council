@@ -45,13 +45,16 @@ const JUDGE_SCHEMA = {
 }
 
 // GPT-5.5 via local Codex CLI (ChatGPT sub, no metered API). -s read-only = it cannot edit.
+// </dev/null is REQUIRED: codex exec waits for stdin EOF ("Reading additional input from stdin...")
+// even with a prompt arg, so when stdin is an open pipe (e.g. the Bash call gets backgrounded on a
+// long xhigh run) it hangs forever and -o "$OUT" is never written. Closing stdin makes it deterministic.
 const codexRun = (prompt) => () =>
   agent(
     `Use the local Codex CLI to analyze the planning task below as an independent senior engineer, then ` +
       `return ONLY Codex's final answer verbatim — no preamble of your own.\n` +
       `Run it non-interactively and read-only. Use exactly:\n` +
       `  OUT=$(mktemp); codex exec -s read-only --skip-git-repo-check -m ${codexModel} ` +
-      `-c model_reasoning_effort="${codexEffort}" -o "$OUT" "<the prompt>"; cat "$OUT"; rm -f "$OUT"\n\n` +
+      `-c model_reasoning_effort="${codexEffort}" -o "$OUT" "<the prompt>" </dev/null; cat "$OUT"; rm -f "$OUT"\n\n` +
       `Pass this as the prompt, and have Codex return: recommended approach, key risks, what NOT to do, ` +
       `and how to verify.\n\n${prompt}`,
     { phase: 'Panel', label: `panel:gpt-${codexModel}` }
