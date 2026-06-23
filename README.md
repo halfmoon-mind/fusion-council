@@ -33,9 +33,10 @@ Local testing without GitHub: point the marketplace at this directory directly
 ## The GPT-5.5 seat (optional)
 
 The non-Claude panel seat shells out to the local **Codex CLI** (`codex exec`,
-ChatGPT subscription — no metered API). If `codex` isn't installed, that seat drops
-out and the council runs Claude-only; every report's **Council Coverage** line says
-so, so reduced diversity is never silent. Install Codex CLI to enable it.
+ChatGPT subscription — no metered API). If `codex` isn't installed — or a run fails
+or times out — that seat drops out and the council runs Claude-only; every report's
+**Council Coverage** line says so, so reduced diversity is never silent. Install
+Codex CLI to enable it.
 
 ## Layout
 
