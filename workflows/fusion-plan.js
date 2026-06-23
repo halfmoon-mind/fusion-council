@@ -48,10 +48,15 @@ const JUDGE_SCHEMA = {
 // </dev/null is REQUIRED: codex exec waits for stdin EOF ("Reading additional input from stdin...")
 // even with a prompt arg, so when stdin is an open pipe (e.g. the Bash call gets backgrounded on a
 // long xhigh run) it hangs forever and -o "$OUT" is never written. Closing stdin makes it deterministic.
+// Failure sentinel (idiomatic here, cf. NO_DIFF / NONE): the seat returns this when codex didn't really
+// run, so the filter below drops it and coverage honestly says UNAVAILABLE instead of faking a "ran".
+const CODEX_FAIL = 'CODEX_UNAVAILABLE'
 const codexRun = (prompt) => () =>
   agent(
     `Use the local Codex CLI to analyze the planning task below as an independent senior engineer, then ` +
-      `return ONLY Codex's final answer verbatim — no preamble of your own.\n` +
+      `return ONLY Codex's final answer verbatim — no preamble of your own. If the codex command fails, ` +
+      `errors, times out, returns nothing, or prints only its banner / "Reading additional input from ` +
+      `stdin...", reply with EXACTLY the single token ${CODEX_FAIL} and nothing else.\n` +
       `Run it non-interactively and read-only. Use exactly:\n` +
       `  OUT=$(mktemp); codex exec -s read-only --skip-git-repo-check -m ${codexModel} ` +
       `-c model_reasoning_effort="${codexEffort}" -o "$OUT" "<the prompt>" </dev/null; cat "$OUT"; rm -f "$OUT"\n\n` +
@@ -115,6 +120,7 @@ const answers = (
 )
   .filter(Boolean) // a failed/throttled seat drops to null
   .filter((r) => r.analysis && String(r.analysis).trim())
+  .filter((r) => String(r.analysis).trim() !== CODEX_FAIL) // codex didn't really run → drop, don't fake it
 
 if (!answers.length) throw new Error('fusion-plan: no panelist produced output')
 
