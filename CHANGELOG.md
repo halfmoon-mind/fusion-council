@@ -1,5 +1,31 @@
 # Changelog
 
+## 0.1.3
+
+Reliability for the GPT-5.5 (Codex CLI) review seat and the `fusion-review` diff-capture path.
+
+- **Fix: the GPT-5.5 review seat reads the diff from a file instead of re-typing it.**
+  The seat used to make the sonnet wrapper retype the entire diff into a heredoc, so a
+  large diff could be silently truncated/reordered while coverage still said "ran". The
+  capture step now writes its snapshot to a temp file and the seat `cat`s that file
+  straight into `codex` — no LLM transcription of the diff — and all seats derive from
+  the one capture snapshot, so the GPT seat and the Claude role seats can't diverge.
+  (The diff is still passed as a single `codex exec` argv, so a >~1MB diff remains
+  ARG_MAX-bound — unchanged from before.)
+- **Fix: a `git diff` error no longer masquerades as a reviewable diff.** Capture now
+  branches on the exact `git diff --quiet` exit code (0 = no diff, 1 = diff, >1 = error),
+  so a git failure yields a `CAPTURE_FAILED` token and the workflow throws instead of
+  silently reviewing a partial/empty diff. The path marker is emitted *before* the diff
+  so it survives even if the capture seat truncates its own returned output.
+- **Fix: the GPT-5.5 seat must run codex before reporting it unavailable.** Both
+  `fusion-plan` and `fusion-review` wrappers were observed returning the
+  `CODEX_UNAVAILABLE` sentinel without ever invoking codex; they are now told they MUST
+  run the command and base the sentinel only on its real output (reduces, does not
+  eliminate, spurious unavailability).
+- **Change: single-source the review framing** shared by the Claude role seats and the
+  GPT seat so the two model families can't drift, and document the new capture-failure
+  `throw` in the `fusion-review` skill.
+
 ## 0.1.2
 
 Hardening for the GPT-5.5 (Codex CLI) panel seat input.

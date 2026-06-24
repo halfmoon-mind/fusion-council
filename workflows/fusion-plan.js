@@ -56,9 +56,11 @@ const CODEX_FAIL = 'CODEX_UNAVAILABLE'
 const codexRun = (prompt) => () =>
   agent(
     `Use the local Codex CLI to analyze the planning task below as an independent senior engineer, then ` +
-      `return ONLY Codex's final answer verbatim — no preamble of your own. If the codex command fails, ` +
-      `errors, times out, returns nothing, or prints only its banner / "Reading additional input from ` +
-      `stdin...", reply with EXACTLY the single token ${CODEX_FAIL} and nothing else.\n` +
+      `return ONLY Codex's final answer verbatim — no preamble of your own.\n` +
+      `You MUST actually run the Bash command below and base your reply ONLY on its real output. NEVER ` +
+      `reply ${CODEX_FAIL} without having run the command — emit that single token (and nothing else) ONLY ` +
+      `when the command you ran genuinely fails, errors, times out, returns nothing, or prints only its ` +
+      `banner / "Reading additional input from stdin...".\n` +
       `Run it non-interactively and read-only. Write the prompt to a temp file via a QUOTED heredoc (so ` +
       `the shell does NOT interpolate it), then pass that file's contents to codex. Run EXACTLY this, ` +
       `copying everything after "PROMPT:" below verbatim between the heredoc markers:\n` +
