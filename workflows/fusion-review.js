@@ -59,15 +59,11 @@ const JUDGE_SCHEMA = {
 const CODEX_FAIL = 'CODEX_UNAVAILABLE'
 const codexRun = (diffPath) => () =>
   agent(
-    `Use the local Codex CLI to review the working-tree diff (already saved on disk) as an independent ` +
-      `senior engineer, then return ONLY Codex's final answer verbatim — no preamble of your own.\n` +
-      `You MUST actually run the Bash command below and base your reply ONLY on its real output. NEVER ` +
-      `reply ${CODEX_FAIL} without having run the command — emit that single token (and nothing else) ONLY ` +
-      `when the command you ran genuinely fails, errors, times out, returns nothing, or prints only its ` +
-      `banner / "Reading additional input from stdin...".\n` +
-      `Run it non-interactively and read-only. Do NOT type the diff yourself — it is ALREADY on disk; the ` +
-      `shell reads it with cat. Run EXACTLY this; the heredoc body is the only fixed text, everything else ` +
-      `is literal shell:\n` +
+    `You drive the local Codex CLI to get GPT-5.5's review of a working-tree diff. Do TWO steps in order; ` +
+      `do NOT skip step 1.\n` +
+      `STEP 1 — run this command verbatim BEFORE writing anything. It is read-only; the diff is ALREADY on ` +
+      `disk so do NOT type it yourself (the shell reads it with cat). The heredoc body is the only fixed ` +
+      `text; everything else is literal shell:\n` +
       `  [ -s '${diffPath}' ] || { echo ${CODEX_FAIL}; exit 0; }\n` +
       `  F=$(mktemp); cat > "$F" <<'FUSION_REVIEW_EOF'\n` +
       `${REVIEW_FRAMING} Report across every dimension the role seats cover: correctness/regression ` +
@@ -76,11 +72,29 @@ const codexRun = (diffPath) => () =>
       `FUSION_REVIEW_EOF\n` +
       `  cat '${diffPath}' >> "$F"\n` +
       `  OUT=$(mktemp); codex exec -s read-only --skip-git-repo-check -m ${codexModel} ` +
-      `-c model_reasoning_effort="${codexEffort}" -o "$OUT" "$(cat "$F")" </dev/null; cat "$OUT"; rm -f "$OUT" "$F" '${diffPath}'`,
+      `-c model_reasoning_effort="${codexEffort}" -o "$OUT" "$(cat "$F")" </dev/null; cat "$OUT"; rm -f "$OUT" "$F" '${diffPath}'\n` +
+      `STEP 2 — return ONLY Codex's final answer from step 1's ACTUAL stdout, verbatim, no preamble of your ` +
+      `own. Reply with EXACTLY the single token ${CODEX_FAIL} (and nothing else) ONLY IF the command you ran ` +
+      `produced no real answer — it errored, timed out, returned nothing, or printed only its banner / ` +
+      `"Reading additional input from stdin...". Do NOT reply ${CODEX_FAIL} without running step 1.`,
     // sonnet, not the inherited Opus: this seat only shells out to codex and returns its output
     // verbatim — GPT-5.5 does the reasoning. Same tier as the capture:diff Bash-runner above.
     { model: 'sonnet', phase: 'Panel', label: `panel:gpt-${codexModel}` }
   )
+
+// The sonnet wrapper sometimes returns the CODEX_FAIL sentinel WITHOUT actually running codex (observed
+// ~1.6s, no Bash call); the prompt mandate above reduces but doesn't eliminate it. Retry the seat ONCE on a
+// sentinel — a genuine codex outage stays CODEX_FAIL on the retry too (and is honestly dropped), but a
+// spurious bail usually runs the second time. Each thunk call is a fresh subagent; only the failure path
+// pays the extra attempt.
+const withCodexRetry = (thunk) => async () => {
+  const first = await thunk()
+  if (first && String(first).trim() !== CODEX_FAIL) return first
+  // `log` is a host-injected workflow global; guard with typeof so a runtime that lacks it can't throw a
+  // ReferenceError on this exact failure path and defeat the retry. (typeof on an undeclared name is safe.)
+  if (typeof log === 'function') log('fusion-review: GPT-5.5 seat returned CODEX_UNAVAILABLE — retrying once')
+  return thunk()
+}
 
 // 0) Capture the diff — it IS the subject. Role panelists are read-only with no Bash, so the diff must
 //    be embedded in their prompt. No diff is a terminal data condition (not a judgment gate): return.
@@ -128,7 +142,7 @@ const PANEL = [
     label: r,
     run: () => agent(READ_ONLY + panelPrompt, { agentType: NS + r, phase: 'Panel', label: `panel:${r}` }),
   })),
-  { label: `gpt-${codexModel}`, run: codexRun(diffPath) },
+  { label: `gpt-${codexModel}`, run: withCodexRetry(codexRun(diffPath)) },
 ]
 
 const answers = (

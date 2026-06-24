@@ -55,26 +55,40 @@ const JUDGE_SCHEMA = {
 const CODEX_FAIL = 'CODEX_UNAVAILABLE'
 const codexRun = (prompt) => () =>
   agent(
-    `Use the local Codex CLI to analyze the planning task below as an independent senior engineer, then ` +
-      `return ONLY Codex's final answer verbatim — no preamble of your own.\n` +
-      `You MUST actually run the Bash command below and base your reply ONLY on its real output. NEVER ` +
-      `reply ${CODEX_FAIL} without having run the command — emit that single token (and nothing else) ONLY ` +
-      `when the command you ran genuinely fails, errors, times out, returns nothing, or prints only its ` +
-      `banner / "Reading additional input from stdin...".\n` +
-      `Run it non-interactively and read-only. Write the prompt to a temp file via a QUOTED heredoc (so ` +
-      `the shell does NOT interpolate it), then pass that file's contents to codex. Run EXACTLY this, ` +
-      `copying everything after "PROMPT:" below verbatim between the heredoc markers:\n` +
+    `You drive the local Codex CLI to get GPT-5.5's analysis of a planning task. Do TWO steps in order; ` +
+      `do NOT skip step 1.\n` +
+      `STEP 1 — run this command verbatim BEFORE writing anything. It is read-only. Copy everything after ` +
+      `"PROMPT:" below verbatim between the heredoc markers (a QUOTED heredoc, so the shell does NOT ` +
+      `interpolate it):\n` +
       `  PIN=$(mktemp); cat > "$PIN" <<'FUSION_PROMPT_EOF'\n` +
       `<the entire PROMPT block below, verbatim>\n` +
       `FUSION_PROMPT_EOF\n` +
       `  OUT=$(mktemp); codex exec -s read-only --skip-git-repo-check -m ${codexModel} ` +
-      `-c model_reasoning_effort="${codexEffort}" -o "$OUT" "$(cat "$PIN")" </dev/null; cat "$OUT"; rm -f "$OUT" "$PIN"\n\n` +
-      `Have Codex return: recommended approach, key risks, what NOT to do, and how to verify.\n\n` +
+      `-c model_reasoning_effort="${codexEffort}" -o "$OUT" "$(cat "$PIN")" </dev/null; cat "$OUT"; rm -f "$OUT" "$PIN"\n` +
+      `STEP 2 — return ONLY Codex's final answer from step 1's ACTUAL stdout, verbatim, no preamble of your ` +
+      `own. Reply with EXACTLY the single token ${CODEX_FAIL} (and nothing else) ONLY IF the command you ran ` +
+      `produced no real answer — it errored, timed out, returned nothing, or printed only its banner / ` +
+      `"Reading additional input from stdin...". Do NOT reply ${CODEX_FAIL} without running step 1.\n\n` +
+      `Ask Codex for: recommended approach, key risks, what NOT to do, and how to verify.\n\n` +
       `PROMPT:\n${prompt}`,
     // sonnet, not the inherited Opus: this seat only shells out to codex and returns its output
     // verbatim — GPT-5.5 does the reasoning. Same tier as the context:session Bash-runner below.
     { model: 'sonnet', phase: 'Panel', label: `panel:gpt-${codexModel}` }
   )
+
+// The sonnet wrapper sometimes returns the CODEX_FAIL sentinel WITHOUT actually running codex (observed
+// ~1.6s, no Bash call); the prompt mandate above reduces but doesn't eliminate it. Retry the seat ONCE on a
+// sentinel — a genuine codex outage stays CODEX_FAIL on the retry too (and is honestly dropped), but a
+// spurious bail usually runs the second time. Each thunk call is a fresh subagent; only the failure path
+// pays the extra attempt.
+const withCodexRetry = (thunk) => async () => {
+  const first = await thunk()
+  if (first && String(first).trim() !== CODEX_FAIL) return first
+  // `log` is a host-injected workflow global; guard with typeof so a runtime that lacks it can't throw a
+  // ReferenceError on this exact failure path and defeat the retry. (typeof on an undeclared name is safe.)
+  if (typeof log === 'function') log('fusion-plan: GPT-5.5 seat returned CODEX_UNAVAILABLE — retrying once')
+  return thunk()
+}
 
 // 0) Context — TWO read-only sources in parallel. Always runs; no-ops cleanly if a source is empty.
 phase('Context')
@@ -123,7 +137,7 @@ const PANEL = [
     label: r,
     run: () => agent(READ_ONLY + panelPrompt, { agentType: NS + r, phase: 'Panel', label: `panel:${r}` }),
   })),
-  { label: `gpt-${codexModel}`, run: codexRun(panelPrompt) },
+  { label: `gpt-${codexModel}`, run: withCodexRetry(codexRun(panelPrompt)) },
 ]
 
 const answers = (

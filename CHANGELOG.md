@@ -1,5 +1,21 @@
 # Changelog
 
+## 0.1.4
+
+Stop the GPT-5.5 (Codex CLI) seat from silently going UNAVAILABLE because its sonnet wrapper returned the
+failure sentinel without ever running codex.
+
+- **Fix: the codex seat wrapper leads with an imperative "STEP 1 — run this command before writing
+  anything"** (mirroring the reliable capture / transcript Bash-runner seats) instead of foregrounding the
+  failure sentinel. The seat was observed returning `CODEX_UNAVAILABLE` with zero Bash calls ~half the time
+  — sometimes twice in a row; with the STEP-1-first framing a follow-up probe ran codex in every sample
+  (4/4). Applies to both `fusion-plan` and `fusion-review`.
+- **Add: retry the codex seat once on a sentinel result.** A genuine codex outage stays `CODEX_UNAVAILABLE`
+  on the retry too (and is honestly dropped from coverage), but a spurious bail usually runs the second
+  time. Only the failure path pays the extra attempt.
+- **Harden: the retry's `log(...)` call is `typeof`-guarded** so a runtime that does not inject the `log`
+  workflow global cannot throw a `ReferenceError` on the failure path and defeat the retry.
+
 ## 0.1.3
 
 Reliability for the GPT-5.5 (Codex CLI) review seat and the `fusion-review` diff-capture path.
