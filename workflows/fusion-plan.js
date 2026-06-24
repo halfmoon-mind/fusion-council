@@ -45,9 +45,11 @@ const JUDGE_SCHEMA = {
 }
 
 // GPT-5.5 via local Codex CLI (ChatGPT sub, no metered API). -s read-only = it cannot edit.
-// </dev/null is REQUIRED: codex exec waits for stdin EOF ("Reading additional input from stdin...")
-// even with a prompt arg, so when stdin is an open pipe (e.g. the Bash call gets backgrounded on a
-// long xhigh run) it hangs forever and -o "$OUT" is never written. Closing stdin makes it deterministic.
+// Input via QUOTED heredoc (<<'EOF') -> temp file -> "$(cat file)" as the prompt arg: the shell does
+// no interpolation, so $ / backticks / quotes in the task or context can't break the command (the old
+// inline "<prompt>" arg could). </dev/null is STILL REQUIRED: codex exec waits for stdin EOF ("Reading
+// additional input from stdin...") even with a prompt arg, so an open-pipe stdin (e.g. a long xhigh run
+// that gets backgrounded) hangs it forever and -o "$OUT" is never written. Closing stdin keeps it deterministic.
 // Failure sentinel (idiomatic here, cf. NO_DIFF / NONE): the seat returns this when codex didn't really
 // run, so the filter below drops it and coverage honestly says UNAVAILABLE instead of faking a "ran".
 const CODEX_FAIL = 'CODEX_UNAVAILABLE'
@@ -57,12 +59,19 @@ const codexRun = (prompt) => () =>
       `return ONLY Codex's final answer verbatim — no preamble of your own. If the codex command fails, ` +
       `errors, times out, returns nothing, or prints only its banner / "Reading additional input from ` +
       `stdin...", reply with EXACTLY the single token ${CODEX_FAIL} and nothing else.\n` +
-      `Run it non-interactively and read-only. Use exactly:\n` +
+      `Run it non-interactively and read-only. Write the prompt to a temp file via a QUOTED heredoc (so ` +
+      `the shell does NOT interpolate it), then pass that file's contents to codex. Run EXACTLY this, ` +
+      `copying everything after "PROMPT:" below verbatim between the heredoc markers:\n` +
+      `  PIN=$(mktemp); cat > "$PIN" <<'FUSION_PROMPT_EOF'\n` +
+      `<the entire PROMPT block below, verbatim>\n` +
+      `FUSION_PROMPT_EOF\n` +
       `  OUT=$(mktemp); codex exec -s read-only --skip-git-repo-check -m ${codexModel} ` +
-      `-c model_reasoning_effort="${codexEffort}" -o "$OUT" "<the prompt>" </dev/null; cat "$OUT"; rm -f "$OUT"\n\n` +
-      `Pass this as the prompt, and have Codex return: recommended approach, key risks, what NOT to do, ` +
-      `and how to verify.\n\n${prompt}`,
-    { phase: 'Panel', label: `panel:gpt-${codexModel}` }
+      `-c model_reasoning_effort="${codexEffort}" -o "$OUT" "$(cat "$PIN")" </dev/null; cat "$OUT"; rm -f "$OUT" "$PIN"\n\n` +
+      `Have Codex return: recommended approach, key risks, what NOT to do, and how to verify.\n\n` +
+      `PROMPT:\n${prompt}`,
+    // sonnet, not the inherited Opus: this seat only shells out to codex and returns its output
+    // verbatim — GPT-5.5 does the reasoning. Same tier as the context:session Bash-runner below.
+    { model: 'sonnet', phase: 'Panel', label: `panel:gpt-${codexModel}` }
   )
 
 // 0) Context — TWO read-only sources in parallel. Always runs; no-ops cleanly if a source is empty.
