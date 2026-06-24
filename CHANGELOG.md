@@ -1,5 +1,23 @@
 # Changelog
 
+## 0.1.2
+
+Hardening for the GPT-5.5 (Codex CLI) panel seat input.
+
+- **Fix: pass the prompt via a quoted heredoc instead of an inline arg.** The seat
+  built `codex exec ... "<the prompt>"` by inlining the task/diff into a
+  double-quoted argument, so shell metacharacters in that text (`$`, backticks,
+  `$(...)`, embedded quotes) expanded or truncated the command — corrupting or
+  dropping what reached Codex, and opening a command-substitution surface. The
+  prompt now goes through a quoted heredoc (`<<'EOF'`) into a temp file, passed as
+  `"$(cat "$PIN")"`. Verified: byte-for-byte passthrough of a hostile diff, where
+  the old form lost a line and expanded `$HOME`. (`</dev/null` and the
+  `CODEX_UNAVAILABLE` sentinel are unchanged.)
+- **Change: pin the seat's wrapper agent to `sonnet`.** It only shells out to
+  `codex exec` and returns the output verbatim — GPT-5.5 does the reasoning — so the
+  inherited Opus was wasted on a subprocess driver. Same tier as the existing
+  context/diff Bash-runner seats; no effect on output quality.
+
 ## 0.1.1
 
 Reliability fixes for the GPT-5.5 (Codex CLI) panel seat.
