@@ -1,5 +1,7 @@
 # Fusion Council
 
+![Fusion Council hero illustration showing multiple read-only review perspectives converging into a synthesized report](assets/fusion-council-hero.png)
+
 Two deterministic, read-only **councils** for Claude Code that vet your work with
 more than one model family before you commit to it:
 
