@@ -1,5 +1,20 @@
 # Changelog
 
+## 0.1.5
+
+Remove the ~1MB ARG_MAX launch ceiling on the GPT-5.5 (Codex CLI) seat so large tasks/diffs can't silently
+fail to start codex.
+
+- **Fix: feed the codex prompt on stdin (`-o "$OUT" - <file`) instead of expanding it into argv via
+  `"$(cat file)"`.** A long task/context (`fusion-plan`) or a large diff (`fusion-review`) was passed as a
+  single `codex exec` argv argument, so once it exceeded the OS `ARG_MAX` (~1MB) the command failed to launch
+  — the seat went UNAVAILABLE on exactly the big inputs that most need GPT-5.5. The prompt is now read from
+  stdin (codex's documented `-` / piped-stdin behavior), which has no argv/`ARG_MAX` ceiling (the
+  model's context-window limit still applies). The `<file` redirect
+  still closes stdin at EOF, so the backgrounded-long-run hang the old explicit `</dev/null` prevented stays
+  fixed — the EOF now comes from the prompt file itself. No timeout was added: a genuinely long high-effort
+  run is allowed to finish rather than be killed. Applies to both `fusion-plan` and `fusion-review`.
+
 ## 0.1.4
 
 Stop the GPT-5.5 (Codex CLI) seat from silently going UNAVAILABLE because its sonnet wrapper returned the

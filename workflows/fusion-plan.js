@@ -45,11 +45,12 @@ const JUDGE_SCHEMA = {
 }
 
 // GPT-5.5 via local Codex CLI (ChatGPT sub, no metered API). -s read-only = it cannot edit.
-// Input via QUOTED heredoc (<<'EOF') -> temp file -> "$(cat file)" as the prompt arg: the shell does
+// Input via QUOTED heredoc (<<'EOF') -> temp file -> fed to codex on STDIN (`- <"$PIN"`): the heredoc does
 // no interpolation, so $ / backticks / quotes in the task or context can't break the command (the old
-// inline "<prompt>" arg could). </dev/null is STILL REQUIRED: codex exec waits for stdin EOF ("Reading
-// additional input from stdin...") even with a prompt arg, so an open-pipe stdin (e.g. a long xhigh run
-// that gets backgrounded) hangs it forever and -o "$OUT" is never written. Closing stdin keeps it deterministic.
+// inline "<prompt>" arg could). Reading the prompt from stdin instead of argv ALSO removes the ~1MB ARG_MAX
+// launch ceiling a long task/context would hit via "$(cat ...)". The `<"$PIN"` redirect still closes stdin
+// at EOF, so codex can't hang waiting for input ("Reading additional input from stdin...") even when a long
+// xhigh run gets backgrounded — the property the old explicit </dev/null gave, now from the file redirect.
 // Failure sentinel (idiomatic here, cf. NO_DIFF / NONE): the seat returns this when codex didn't really
 // run, so the filter below drops it and coverage honestly says UNAVAILABLE instead of faking a "ran".
 const CODEX_FAIL = 'CODEX_UNAVAILABLE'
@@ -64,7 +65,7 @@ const codexRun = (prompt) => () =>
       `<the entire PROMPT block below, verbatim>\n` +
       `FUSION_PROMPT_EOF\n` +
       `  OUT=$(mktemp); codex exec -s read-only --skip-git-repo-check -m ${codexModel} ` +
-      `-c model_reasoning_effort="${codexEffort}" -o "$OUT" "$(cat "$PIN")" </dev/null; cat "$OUT"; rm -f "$OUT" "$PIN"\n` +
+      `-c model_reasoning_effort="${codexEffort}" -o "$OUT" - <"$PIN"; cat "$OUT"; rm -f "$OUT" "$PIN"\n` +
       `STEP 2 — return ONLY Codex's final answer from step 1's ACTUAL stdout, verbatim, no preamble of your ` +
       `own. Reply with EXACTLY the single token ${CODEX_FAIL} (and nothing else) ONLY IF the command you ran ` +
       `produced no real answer — it errored, timed out, returned nothing, or printed only its banner / ` +

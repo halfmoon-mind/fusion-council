@@ -44,15 +44,15 @@ const JUDGE_SCHEMA = {
 // an LLM. The old path made the sonnet wrapper retype the whole diff into a heredoc body — large diffs got
 // truncated/reordered while coverage still said "ran". Now only the small fixed review instruction goes
 // through the QUOTED heredoc (which the wrapper copies reliably); the diff is appended from the captured
-// file via `>>`, so no LLM transcription can corrupt it. (It is STILL expanded into codex's argv via
-// "$(cat "$F")", so a very large diff can still hit the ~1MB ARG_MAX and fail to launch — that limit is
-// unchanged from the old path. And only the GPT seat reads the file: the 3 Claude role seats still embed
-// `d`, haiku's copy of the SAME snapshot — so this fix is the GPT seat only.) All seats derive from the
-// ONE capture, so there is no Capture-vs-Panel timing divergence and the GPT seat needs no git/cwd of its
-// own (verified: a temp file written by one subagent is readable by another, and an end-to-end run reports
-// "GPT-5.5: ran"). </dev/null is STILL REQUIRED: codex exec waits for stdin EOF ("Reading additional input
-// from stdin...") even with a prompt arg, so an open-pipe stdin (e.g. a backgrounded long xhigh run) hangs
-// it forever and -o "$OUT" is never written.
+// file via `>>`, so no LLM transcription can corrupt it. The full prompt file is fed to codex on STDIN
+// (`- <"$F"`), NOT expanded into argv, so even a very large diff can't hit the ~1MB ARG_MAX launch ceiling
+// the old "$(cat "$F")" path had. (Only the GPT seat reads the captured file: the 3 Claude role seats still
+// embed `d`, haiku's copy of the SAME snapshot — so this stdin/ARG_MAX fix is the GPT seat only.) All seats
+// derive from the ONE capture, so there is no Capture-vs-Panel timing divergence and the GPT seat needs no
+// git/cwd of its own (verified: a temp file written by one subagent is readable by another, and an
+// end-to-end run reports "GPT-5.5: ran"). The `<"$F"` redirect also closes stdin at EOF, so codex can't hang
+// waiting for input ("Reading additional input from stdin...") on a backgrounded long xhigh run — the
+// property the old explicit </dev/null gave, now supplied by feeding the prompt file itself.
 // Failure sentinel (idiomatic here, cf. NO_DIFF): the seat returns this when codex didn't really run — or
 // when the captured diff file is missing/empty — so the filter below drops it and coverage honestly says
 // UNAVAILABLE instead of faking a "ran".
@@ -72,7 +72,7 @@ const codexRun = (diffPath) => () =>
       `FUSION_REVIEW_EOF\n` +
       `  cat '${diffPath}' >> "$F"\n` +
       `  OUT=$(mktemp); codex exec -s read-only --skip-git-repo-check -m ${codexModel} ` +
-      `-c model_reasoning_effort="${codexEffort}" -o "$OUT" "$(cat "$F")" </dev/null; cat "$OUT"; rm -f "$OUT" "$F" '${diffPath}'\n` +
+      `-c model_reasoning_effort="${codexEffort}" -o "$OUT" - <"$F"; cat "$OUT"; rm -f "$OUT" "$F" '${diffPath}'\n` +
       `STEP 2 — return ONLY Codex's final answer from step 1's ACTUAL stdout, verbatim, no preamble of your ` +
       `own. Reply with EXACTLY the single token ${CODEX_FAIL} (and nothing else) ONLY IF the command you ran ` +
       `produced no real answer — it errored, timed out, returned nothing, or printed only its banner / ` +
