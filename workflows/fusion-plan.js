@@ -127,7 +127,11 @@ if (sb && sb !== 'NONE' && sb !== 'NO_TRANSCRIPT')
   parts.push('## Session context — prior decisions & rationale\n' + sb)
 const ctx = parts.join('\n\n') || '(no extra context resolved)'
 
-const panelPrompt = `TASK:\n${task}\n\nCONTEXT:\n${ctx}`
+const panelPrompt =
+  `TASK:\n${task}\n\nCONTEXT:\n${ctx}\n\n` +
+  `When you make a claim about EXISTING code, cite the path:line it concerns; if you cannot, prefix that ` +
+  `claim with [UNVERIFIED]. This does NOT apply to forward-looking recommendations about code that does ` +
+  `not exist yet.`
 
 // 1) Panel — 4 Claude role seats (agentType loads each .md's role prompt + read-only tools) + GPT-5.5.
 //    All parallel; the judge needs them together, so a barrier here is correct.
@@ -165,7 +169,15 @@ const judge = await agent(
     `Compare on merit — no panelist is privileged. Extract: consensus; contradictions; uniqueInsights ` +
     `(valuable points only ONE raised — prefix with the panelist); coverageGaps; blindSpots; and ` +
     `invalidClaims (any claim, INCLUDING GPT's, that is wrong, unsupported, or conflicts with the repo/` +
-    `constraints — format "panelist: claim — why").`,
+    `constraints — format "panelist: claim — why").\n\n` +
+    `GROUNDING: verify only DESCRIPTIVE premises — that cited CURRENT code exists as claimed (use your ` +
+    `read-only tools to open a cited path:line; tolerate paraphrase, do NOT require a verbatim quote). Put ` +
+    `in invalidClaims (format "panelist: claim — ungroundable") any claim about EXISTING code you cannot ` +
+    `tie to real code, and be willing to drop a weakly-grounded SINGLE-SOURCE claim this way; NEVER drop a ` +
+    `consensus/cross-model claim for being single-raised. CRITICAL: this is a pre-implementation plan — ` +
+    `NEVER mark a forward-looking "should add/change X" recommendation ungroundable just because the target ` +
+    `code does not exist yet. Default-to-invalidClaims on uncertainty applies ONLY to concrete claims about ` +
+    `existing code — never to recommendations or judgment calls.`,
   { schema: JUDGE_SCHEMA, model: 'opus', phase: 'Judge', label: 'judge' }
 )
 
@@ -176,7 +188,10 @@ const plan = await agent(
     `${panelPrompt}\n\nPanel analyses (JSON):\n${JSON.stringify(answers)}\n\n` +
     `Judge (JSON):\n${JSON.stringify(judge)}\n\nCouncil coverage: ${coverage}\n\n` +
     `Write ONE implementation plan. Keep consensus, resolve contradictions, preserve every uniqueInsight ` +
-    `(do NOT drop a point just because one panelist raised it), fill coverageGaps, avoid blindSpots, and ` +
+    `that survived invalidClaims (do NOT drop a surviving point merely for being single-source, and do NOT ` +
+    `re-litigate the judge's merit calls; you MAY drop only an item that directly contradicts the repo/` +
+    `constraints or would break the output contract, listing it under "Dropped claims" with the reason), ` +
+    `fill coverageGaps, avoid blindSpots, and ` +
     `EXCLUDE everything in invalidClaims (list each dropped claim + reason under "Dropped claims"). ` +
     `Prefer the smallest safe change. This is a PLAN ONLY — do not implement.\n\n` +
     `Output EXACTLY this structure:\n` +

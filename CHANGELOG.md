@@ -1,5 +1,27 @@
 # Changelog
 
+## 0.1.6
+
+Reduce false positives in the judge/synthesize stages: ground panelist findings against real code before they
+reach the report, instead of carrying any plausible-sounding claim through.
+
+- **Add: the judge re-grounds every concrete code claim before keeping it.** Each judge prompt now confirms a
+  cited `path:line` / quoted code against the embedded diff (`fusion-review`) or by opening the file with its
+  read-only tools, tolerating paraphrase, and drops ungroundable concrete claims — and weakly-grounded
+  single-source findings — into `invalidClaims`. Consensus / cross-model findings are never dropped for being
+  single-raised. Applies to both `fusion-plan` and `fusion-review`.
+- **Add: plan-mode carve-out for forward-looking recommendations.** `fusion-plan` runs before implementation,
+  so its judge verifies only DESCRIPTIVE premises (cited *current* code exists as claimed) and never marks a
+  "should add/change X" recommendation ungroundable just because the target code does not exist yet.
+- **Change: keep a single merit gate, with a narrow synthesize backstop.** Synthesis no longer force-includes
+  single-source findings and must not re-litigate the judge's merit calls; it may drop only an item that
+  directly contradicts the diff/repo or would break the output contract. `fusion-review` excludes silently
+  (its fixed output structure has no dropped-claims slot); `fusion-plan` lists drops under "Dropped claims".
+- **Add: panelist citation discipline.** The shared framing asks each seat to cite the `path:line` a concrete
+  code claim concerns, or prefix it `[UNVERIFIED]` (an advisory prose marker, parsed nowhere). In review mode
+  an out-of-hunk line is valid only if it bears on behavior the diff changes, so unrelated pre-existing issues
+  are not promoted into a diff-scoped review.
+
 ## 0.1.5
 
 Remove the ~1MB ARG_MAX launch ceiling on the GPT-5.5 (Codex CLI) seat so large tasks/diffs can't silently

@@ -22,7 +22,8 @@ const READ_ONLY =
 // explicit dimension list because, unlike the role seats, codex has no role .md telling it what to cover.)
 const REVIEW_FRAMING =
   'Review the following working-tree diff. Be terse and actionable; ground every finding in a file/line ' +
-  'or a concrete behavior. Do not suggest unrelated cleanup.'
+  'or a concrete behavior. Do not suggest unrelated cleanup. For every concrete code claim, cite the ' +
+  'path:line it concerns; if you cannot, prefix that finding with [UNVERIFIED].'
 
 // Same merit schema as fusion-plan: invalidClaims lets synthesis drop any panelist's weak finding.
 const JUDGE_SCHEMA = {
@@ -168,7 +169,17 @@ const judge = await agent(
     `Compare on merit — no panelist is privileged. Extract: consensus; contradictions; uniqueInsights ` +
     `(real issues only ONE caught — prefix with the panelist); coverageGaps; blindSpots; and ` +
     `invalidClaims (any finding, INCLUDING GPT's, that is wrong, out of scope, or unsupported by the ` +
-    `diff — format "panelist: finding — why").`,
+    `diff — format "panelist: finding — why").\n\n` +
+    `GROUNDING: for every finding that cites a path:line or describes specific code, confirm it against the ` +
+    `diff above; use your read-only tools to open the cited file ONLY if it is not in the diff. Ground on ` +
+    `whether the citation EXISTS and CONCERNS that code — tolerate paraphrase, do NOT require a verbatim ` +
+    `quote. Put in invalidClaims (format "panelist: finding — ungroundable") any CONCRETE code claim you ` +
+    `cannot tie to real code, and be willing to drop a weakly-grounded SINGLE-SOURCE finding this way; ` +
+    `NEVER drop a consensus/cross-model finding for being single-raised. Prefer the embedded diff as ground ` +
+    `truth; treat any on-disk file read as supplementary (the working tree may differ from the diff ` +
+    `snapshot). A finding about a line OUTSIDE the diff hunk is VALID only if it bears on behavior the diff ` +
+    `CHANGES — an unrelated pre-existing issue is out-of-scope, so exclude it. Default-to-invalidClaims on ` +
+    `uncertainty applies ONLY to concrete code claims — never to judgment calls or recommendations.`,
   { schema: JUDGE_SCHEMA, model: 'opus', phase: 'Judge', label: 'judge' }
 )
 
@@ -178,8 +189,11 @@ const review = await agent(
   READ_ONLY +
     `${panelPrompt}\n\nReviewer findings (JSON):\n${JSON.stringify(answers)}\n\n` +
     `Judge (JSON):\n${JSON.stringify(judge)}\n\nCouncil coverage: ${coverage}\n\n` +
-    `Write ONE review report. Keep consensus, preserve every uniqueInsight, surface blindSpots/` +
-    `coverageGaps, and EXCLUDE everything in invalidClaims. Only actionable findings. Do not edit files.\n\n` +
+    `Write ONE review report. Keep consensus, preserve every uniqueInsight that survived invalidClaims (do ` +
+    `NOT drop a finding merely for being single-source, and do NOT re-litigate the judge's merit calls; you ` +
+    `MAY silently drop only an item that directly contradicts the diff or would break the output contract), ` +
+    `surface blindSpots/coverageGaps, and silently EXCLUDE everything in invalidClaims (do NOT add a ` +
+    `dropped-claims section; keep the exact output structure below). Only actionable findings. Do not edit files.\n\n` +
     `Output EXACTLY this structure:\n` +
     '# Fusion Review\n## Findings  (each: Severity / File / Issue / Suggested fix / Raised by)\n' +
     '## Cross-Model Agreement  (findings multiple families independently flagged)\n' +
