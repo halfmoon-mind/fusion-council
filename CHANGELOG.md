@@ -1,5 +1,22 @@
 # Changelog
 
+## 0.1.8
+
+Teach the councils to catch fail-open defaults and defensive-code smear — a failure mode the existing
+"smallest safe change" framing never named. The role seats now treat fail-closed as the default and flag
+error-swallowing fallbacks and guards buried in internal logic instead of at trust boundaries.
+
+- **Add: fail-closed lens in the skeptic seat.** `fusion-skeptic` now flags fallbacks / try-catch /
+  graceful degradation that swallow errors instead of surfacing them (they hide bugs and stretch their
+  lifecycle), and flags defensive code smeared through internal logic rather than placed at trust
+  boundaries (untrusted input, I/O, external calls) — any guard that does not trace to a real, reachable
+  failure. Fail-open is a deliberate boundary call, never an internal-logic default. Runs in both
+  `fusion-plan` and `fusion-review` (skeptic seats both).
+- **Add: fail-closed + root-cause guidance in the architect seat.** `fusion-architect` now prefers
+  fail-closed, places error handling only at trust boundaries where it guards a real, reachable failure
+  (not graceful degradation smeared through internal logic), and for a bug fix targets the root cause,
+  not the symptom. Planning-only (`fusion-review` has no architect seat).
+
 ## 0.1.7
 
 Cut GPT-5.5 (Codex CLI) seat latency — the slowest seat in the parallel panel barrier — by lowering its

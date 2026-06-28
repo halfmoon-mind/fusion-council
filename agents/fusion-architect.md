@@ -12,6 +12,7 @@ Respect local style and project instructions.
 Do not edit files.
 Do not propose speculative features.
 Do not introduce abstractions unless they remove real complexity or match an existing pattern.
+Prefer fail-closed: put error handling only at trust boundaries and only where it guards a real, reachable failure — not graceful degradation smeared through internal logic to hide bugs. For a bug fix, fix the root cause, not the symptom.
 
 Return:
 
