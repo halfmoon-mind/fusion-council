@@ -11,7 +11,8 @@ export const meta = {
 const NS = 'fusion-council:'
 
 const codexModel = (args && args.codexModel) || 'gpt-5.5'
-const codexEffort = (args && args.codexEffort) || 'xhigh'
+// 'high' = near-xhigh quality but ~1.6x faster on long tasks (measured A/B); pass codexEffort:'xhigh' for the hardest.
+const codexEffort = (args && args.codexEffort) || 'high'
 
 const READ_ONLY =
   'You are in read-only deliberation mode. You MAY read files, but you MUST NOT create, modify, or ' +

@@ -17,9 +17,10 @@ if (!task || !String(task).trim()) {
 }
 
 // GPT-5.5 = the ONLY non-Claude diversity axis, so it's a MANDATORY panel seat (always in PANEL below).
-// ChatGPT sub only runs gpt-5.5 / gpt-5.4; xhigh = quality-first (pass codexEffort:'low' for speed).
+// ChatGPT sub only runs gpt-5.5 / gpt-5.4; 'high' = near-xhigh quality but ~1.6x faster on long tasks
+// (measured A/B, identical input), so it's the default; pass codexEffort:'xhigh' for the hardest, 'low' for raw speed.
 const codexModel = (args && args.codexModel) || 'gpt-5.5'
-const codexEffort = (args && args.codexEffort) || 'xhigh'
+const codexEffort = (args && args.codexEffort) || 'high'
 const noContext = !!(args && args.noContext)
 
 // Read-only guard — belt-and-suspenders on top of each agent's own tool restriction. This is an

@@ -1,5 +1,19 @@
 # Changelog
 
+## 0.1.7
+
+Cut GPT-5.5 (Codex CLI) seat latency — the slowest seat in the parallel panel barrier — by lowering its
+default reasoning effort, with no measurable quality drop.
+
+- **Change: default `codexEffort` from `xhigh` to `high` in both workflows.** The GPT-5.5 seat is a
+  `parallel()` barrier seat, so the whole Panel phase waits on it; session history showed real `codex exec`
+  calls at xhigh running 50–156s (median ~85s) vs Claude role seats ~50–80s, making it the latency long pole.
+  A controlled A/B on identical input measured xhigh ≈ 1.6× the wall of `high` (23.6s vs 14.8s) with no gain
+  in answer quality or length, so `high` is the new default. Pass `codexEffort:'xhigh'` per run for the
+  hardest tasks, `'low'` for raw speed. The global `~/.codex/config.toml` is left unchanged (it governs
+  interactive codex / codex-rescue, not these workflows, which pass `-c model_reasoning_effort` explicitly).
+  Applies to both `fusion-plan` and `fusion-review`.
+
 ## 0.1.6
 
 Reduce false positives in the judge/synthesize stages: ground panelist findings against real code before they

@@ -1,6 +1,6 @@
 {
   "name": "fusion-council",
-  "version": "0.1.6",
+  "version": "0.1.7",
   "description": "Multi-model planning & review councils for Claude Code: a Claude role panel (architect/skeptic/test/maintainer) plus GPT-5.5 via the local Codex CLI, judged and synthesized into one plan or one review.",
   "keywords": ["planning", "code-review", "multi-model", "council", "workflow"]
 }
