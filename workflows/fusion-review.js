@@ -26,6 +26,9 @@ const REVIEW_FRAMING =
   'or a concrete behavior. Do not suggest unrelated cleanup. For every concrete code claim, cite the ' +
   'path:line it concerns; if you cannot, prefix that finding with [UNVERIFIED].'
 
+// ONE GPT seat (not N "role-lens" seats) with a two-section prompt (correctness + tests/scope): multiple
+// GPT seats add zero model-family diversity and would let two GPT answers agreeing read as "cross-model
+// consensus" to the family-blind judge, shielding a shared GPT error from the single-source merit drop.
 // Same merit schema as fusion-plan: invalidClaims lets synthesis drop any panelist's weak finding.
 const JUDGE_SCHEMA = {
   type: 'object',
@@ -68,8 +71,8 @@ const codexRun = (diffPath) => () =>
       `text; everything else is literal shell:\n` +
       `  [ -s '${diffPath}' ] || { echo ${CODEX_FAIL}; exit 0; }\n` +
       `  F=$(mktemp); cat > "$F" <<'FUSION_REVIEW_EOF'\n` +
-      `${REVIEW_FRAMING} Report across every dimension the role seats cover: correctness/regression ` +
-      `risks, hidden coupling, overengineering, missing tests, and anything outside the change's scope.\n\n` +
+      `${REVIEW_FRAMING} Report in TWO sections: (A) CORRECTNESS — regression risks, hidden coupling, ` +
+      `overengineering; (B) TESTS & SCOPE — missing tests and out-of-scope changes.\n\n` +
       `DIFF:\n` +
       `FUSION_REVIEW_EOF\n` +
       `  cat '${diffPath}' >> "$F"\n` +

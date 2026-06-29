@@ -1,5 +1,25 @@
 # Changelog
 
+## 0.1.9
+
+Sharpen the single GPT-5.5 seat's prompt instead of adding seats. We evaluated splitting GPT into two
+role-lens seats to "balance" the 4-Claude / 1-GPT panel and rejected it on merit: same-model seats add zero
+model-family diversity, and two GPT answers agreeing would read as cross-model "consensus" to the
+family-blind judge — shielding a shared GPT error from the single-source merit drop. The one seat now asks
+for two terse sections instead.
+
+- **Change: GPT seat prompt → two labeled sections in both workflows.** `fusion-plan` asks for
+  (A) RECOMMENDATION (approach + how to verify) and (B) RISKS (key risks, simpler alternatives, what NOT to
+  do); `fusion-review` asks for (A) CORRECTNESS (regression / coupling / overengineering) and (B) TESTS &
+  SCOPE (missing tests, out-of-scope changes). Same coverage as before, but the judge gets the constructive
+  and adversarial points cleanly separated for merit comparison.
+- **Add: brevity cap on the plan GPT seat** ("a few bullets each, not prose"). The seat previously had no
+  length bound; `fusion-review` already caps output via `REVIEW_FRAMING`'s "be terse and actionable", so
+  output stays at or below the old length despite the richer structure.
+- **Add: rationale comments — GPT stays ONE seat, not N.** Both workflows now document why multiple
+  same-family seats weaken the merit gate (intra-model agreement masquerading as cross-model consensus), so
+  the single-seat design is not re-litigated.
+
 ## 0.1.8
 
 Teach the councils to catch fail-open defaults and defensive-code smear — a failure mode the existing

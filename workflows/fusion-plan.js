@@ -17,6 +17,10 @@ if (!task || !String(task).trim()) {
 }
 
 // GPT-5.5 = the ONLY non-Claude diversity axis, so it's a MANDATORY panel seat (always in PANEL below).
+// ONE seat (not N "role-lens" seats) with a two-section prompt (recommend + risks): splitting GPT into
+// multiple seats adds ZERO model-family diversity (same model), and two GPT answers agreeing would read as
+// "cross-model consensus" to the family-blind judge — shielding a shared GPT error from the single-source
+// merit drop. One honest single-source seat avoids that; depth comes from the two prompt sections instead.
 // ChatGPT sub only runs gpt-5.5 / gpt-5.4; 'high' = near-xhigh quality but ~1.6x faster on long tasks
 // (measured A/B, identical input), so it's the default; pass codexEffort:'xhigh' for the hardest, 'low' for raw speed.
 const codexModel = (args && args.codexModel) || 'gpt-5.5'
@@ -71,7 +75,8 @@ const codexRun = (prompt) => () =>
       `own. Reply with EXACTLY the single token ${CODEX_FAIL} (and nothing else) ONLY IF the command you ran ` +
       `produced no real answer — it errored, timed out, returned nothing, or printed only its banner / ` +
       `"Reading additional input from stdin...". Do NOT reply ${CODEX_FAIL} without running step 1.\n\n` +
-      `Ask Codex for: recommended approach, key risks, what NOT to do, and how to verify.\n\n` +
+      `Ask Codex for TWO terse sections (a few bullets each, not prose): (A) RECOMMENDATION — recommended ` +
+      `approach and how to verify; (B) RISKS — key risks, simpler alternatives, and what NOT to do.\n\n` +
       `PROMPT:\n${prompt}`,
     // sonnet, not the inherited Opus: this seat only shells out to codex and returns its output
     // verbatim — GPT-5.5 does the reasoning. Same tier as the context:session Bash-runner below.
