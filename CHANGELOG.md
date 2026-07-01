@@ -1,5 +1,23 @@
 # Changelog
 
+## 0.1.10
+
+Give `fusion-review` a first-class **Open Questions** section so the honest-recall signal the judge already
+produces (`coverageGaps` / `blindSpots`) — plus the unstated assumptions a diff leaves open — is surfaced to
+the reader instead of being folded into Findings and lost. This is the one recall move an LLM does honestly:
+it ASKS rather than asserts, so it adds no false positives, and it mirrors the `## Open Questions` slot
+`fusion-plan` already ships. Chosen over building a separate code-derived "case" council: a three-run A/B
+evaluation (naive anchor-count → reversed-fix outcome → injected-bug / cross-file with clean controls) never
+showed such a generator catch a real bug the existing role seats' coverage missed — the cheap path matched it
+every time — so the evidence did not justify the new machinery (kept shelved behind that unmet bar).
+
+- **Add: `## Open Questions` section in `fusion-review`'s synthesized report**, placed before Council
+  Coverage (consistent with `fusion-plan`). The synthesize prompt now ROUTES the judge's
+  `coverageGaps`/`blindSpots` plus any unstated assumptions / unspecified requirements into it, phrased as
+  questions tied to a `path:line` where possible. It asserts nothing ungroundable, so it does not
+  reintroduce the false positives the 0.1.6–0.1.9 precision arc removed; the fixed output contract is
+  otherwise unchanged (still no dropped-claims slot, `invalidClaims` still silently excluded).
+
 ## 0.1.9
 
 Sharpen the single GPT-5.5 seat's prompt instead of adding seats. We evaluated splitting GPT into two
