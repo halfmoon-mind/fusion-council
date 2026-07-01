@@ -196,13 +196,20 @@ const review = await agent(
     `Write ONE review report. Keep consensus, preserve every uniqueInsight that survived invalidClaims (do ` +
     `NOT drop a finding merely for being single-source, and do NOT re-litigate the judge's merit calls; you ` +
     `MAY silently drop only an item that directly contradicts the diff or would break the output contract), ` +
-    `surface blindSpots/coverageGaps, and silently EXCLUDE everything in invalidClaims (do NOT add a ` +
-    `dropped-claims section; keep the exact output structure below). Only actionable findings. Do not edit files.\n\n` +
+    `route coverageGaps/blindSpots — plus any unstated assumptions or unspecified requirements the diff ` +
+    `leaves open — into the "## Open Questions" section as QUESTIONS (that section ASKS; it must not assert ` +
+    `a finding you cannot ground, so it never adds false positives), and silently EXCLUDE everything in ` +
+    `invalidClaims (do NOT add a dropped-claims section; keep the exact output structure below). Only ` +
+    `actionable findings. Do not edit files.\n\n` +
     `Output EXACTLY this structure:\n` +
     '# Fusion Review\n## Findings  (each: Severity / File / Issue / Suggested fix / Raised by)\n' +
     '## Cross-Model Agreement  (findings multiple families independently flagged)\n' +
     '## Test Gaps\n## Scope Check  (stayed within request? unrelated changes?)\n' +
-    `## Recommended Next Action\n## Council Coverage  (${coverage})\n\n` +
+    '## Recommended Next Action\n' +
+    '## Open Questions  (unstated assumptions / unspecified requirements / dimensions not covered — tie ' +
+    'each to a path:line where possible; phrase as questions, assert nothing ungrounded; omit the section ' +
+    'only if genuinely none)\n' +
+    `## Council Coverage  (${coverage})\n\n` +
     `If there are no actionable issues, say so clearly and list any residual test risk.`,
   { model: 'opus', phase: 'Synthesize', label: 'synthesize' }
 )
