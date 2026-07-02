@@ -1,1 +1,8 @@
 .DS_Store
+
+# bench: exclude case datasets (derived from a private repo) + runtime artifacts
+bench/dataset/*.jsonl
+bench/dataset/patches/
+bench/scratch/
+bench/results/
+bench/**/*.fix.patch

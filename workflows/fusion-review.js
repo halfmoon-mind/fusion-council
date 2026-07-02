@@ -103,51 +103,70 @@ const withCodexRetry = (thunk) => async () => {
 
 // 0) Capture the diff — it IS the subject. Role panelists are read-only with no Bash, so the diff must
 //    be embedded in their prompt. No diff is a terminal data condition (not a judgment gate): return.
+// HARDENED: the haiku capture seat occasionally DROPS the ===FUSION_DIFF_PATH=== marker line (it echoes the
+// diff body but strips the "preamble" marker), which used to throw "capture unavailable" mid-run. We now
+// (a) tell the seat explicitly to keep every line, (b) RETRY the capture up to 3x, and (c) parse leniently:
+// if the marker was stripped but the diff body survived (---DIFF--- present), review it anyway (the GPT
+// seat, which needs the temp-file path to cat, then honestly reports UNAVAILABLE in coverage). Only a clean
+// NO_DIFF is "nothing to review"; a persistently unparseable result still throws (git error can't skip a diff).
 phase('Capture')
-const diff = await agent(
-  `Run EXACTLY this one read-only Bash command and return its output verbatim — nothing else, and do ` +
-    `NOT wrap it in code fences:\n` +
-    `  git diff --quiet; rc=$?; if [ "$rc" = 0 ]; then echo NO_DIFF; elif [ "$rc" = 1 ]; then F=$(mktemp); ` +
-    `{ git status --short; echo '---DIFF---'; git diff; } > "$F"; printf '===FUSION_DIFF_PATH===%s\\n' "$F"; cat "$F"; ` +
-    `else echo CAPTURE_FAILED; fi`,
-  { model: 'haiku', phase: 'Capture', label: 'capture:diff' }
-)
-// The capture seat saved the snapshot to a temp file and printed a ===FUSION_DIFF_PATH=== marker line
-// FIRST, then the diff. Marker-first is deliberate: if the haiku seat truncates its RETURN on a very large
-// diff, the path still survives at the top, so the GPT seat can still cat the FULL diff from the file (only
-// the role seats' embedded `d` would be short). The marker's presence is the "diff exists" signal.
-const raw = diff ? String(diff).trim() : ''
-// Capture emits exactly one of: `NO_DIFF` (rc 0), `===FUSION_DIFF_PATH===<path>\n<diff>` (rc 1), or
-// `CAPTURE_FAILED` (git errored, rc>1 — so a git error can't masquerade as a reviewable diff). Match the
-// marker ANCHORED to start-of-line so a diff body that contains the literal string (e.g. reviewing THIS
-// file) can't false-match — only capture's printf emits it at column 0 — and capture the path to EOL so a
-// TMPDIR with spaces survives. The marker is the FIRST line, so the first anchored match is the real one.
-// (mktemp yields an alphanumeric path, so the single-quoted '${diffPath}' in the GPT seat is safe; a quote
-// in TMPDIR is not handled.)
-const pm = raw.match(/^===FUSION_DIFF_PATH===(.+)$/m)
-if (!pm) {
-  // No marker: ONLY a line that is exactly NO_DIFF is "nothing to review" (line-anchored, not a loose
-  // substring, and tolerant of fences/whitespace the haiku seat may add). CAPTURE_FAILED or any other
-  // output means capture FAILED — fail loudly rather than silently skip a dirty tree.
-  if (/^\s*NO_DIFF\s*$/m.test(raw)) {
-    return { review: 'No working-tree diff to review.', coverage: 'skipped — no diff', panel: [] }
-  }
-  throw new Error('fusion-review: capture produced neither a diff-path marker nor NO_DIFF (capture unavailable)')
+const CAPTURE_CMD =
+  `Run EXACTLY this one read-only Bash command and return its output verbatim — nothing else, do NOT wrap ` +
+  `it in code fences, and do NOT drop, reorder, or summarize any line (the FIRST line is a marker you MUST ` +
+  `keep):\n` +
+  `  git diff --quiet; rc=$?; if [ "$rc" = 0 ]; then echo NO_DIFF; elif [ "$rc" = 1 ]; then F=$(mktemp); ` +
+  `{ git status --short; echo '---DIFF---'; git diff; } > "$F"; printf '===FUSION_DIFF_PATH===%s\\n' "$F"; cat "$F"; ` +
+  `else echo CAPTURE_FAILED; fi`
+// Marker is anchored to start-of-line (only capture's printf emits it at column 0) so a diff body that
+// contains the literal string can't false-match; ---DIFF--- is the fallback "diff exists" signal.
+const hasBody = (s) => /(^|\n)---DIFF---(\r?\n|$)/.test(s)
+const isNoDiff = (s) => /^\s*NO_DIFF\s*$/m.test(s) && !/CAPTURE_FAILED/.test(s)
+let raw = ''
+let pm = null
+for (let attempt = 1; attempt <= 3; attempt++) {
+  const diff = await agent(CAPTURE_CMD, {
+    model: 'haiku',
+    phase: 'Capture',
+    label: attempt === 1 ? 'capture:diff' : `capture:diff:retry${attempt - 1}`,
+  })
+  raw = diff ? String(diff).trim() : ''
+  pm = raw.match(/^===FUSION_DIFF_PATH===(.+)$/m)
+  if (pm || hasBody(raw) || isNoDiff(raw)) break // accept a marker, a surviving diff body, or a clean NO_DIFF
+  if (typeof log === 'function') log(`fusion-review: capture unparseable (attempt ${attempt}/3) — retrying`)
 }
-const diffPath = pm[1].trim()
-const d = raw.slice(pm.index + pm[0].length).trim() // diff follows the marker line now
+
+let diffPath, d
+if (pm) {
+  // Normal path: marker present. path = the temp file (GPT seat cats it); d = the snapshot body after it.
+  diffPath = pm[1].trim()
+  d = raw.slice(pm.index + pm[0].length).trim()
+} else if (hasBody(raw)) {
+  // Marker dropped across all retries but the diff body survived: review it with the Claude seats. No
+  // temp-file path -> the GPT seat can't cat it and honestly reports UNAVAILABLE (no throw, no silent skip).
+  diffPath = ''
+  d = raw
+} else if (isNoDiff(raw)) {
+  return { review: 'No working-tree diff to review.', coverage: 'skipped — no diff', panel: [] }
+} else {
+  throw new Error('fusion-review: capture produced neither a diff nor NO_DIFF after 3 attempts (capture unavailable)')
+}
 
 const panelPrompt = `${REVIEW_FRAMING}\n\nDIFF:\n${d}`
 
 // 1) Panel — 3 Claude reviewer roles (architect is for planning, not review) + GPT-5.5. All parallel.
+// BENCH-ONLY roster control (default-preserving): args.seats selects which seats run; omitted => all four
+// (byte-identical to shipped). The benchmark uses it to isolate ablations — e.g. claude-only drops 'gpt',
+// so council and claude-only differ by exactly one seat through this same real path. Not exposed via the skill.
 phase('Panel')
-const ROLES = ['fusion-skeptic', 'fusion-test-strategist', 'fusion-maintainer']
+const ROLE_MAP = { skeptic: 'fusion-skeptic', test: 'fusion-test-strategist', maintainer: 'fusion-maintainer' }
+const seats = args && Array.isArray(args.seats) ? args.seats : ['skeptic', 'test', 'maintainer', 'gpt']
+const ROLES = seats.filter((s) => ROLE_MAP[s]).map((s) => ROLE_MAP[s])
 const PANEL = [
   ...ROLES.map((r) => ({
     label: r,
     run: () => agent(READ_ONLY + panelPrompt, { agentType: NS + r, phase: 'Panel', label: `panel:${r}` }),
   })),
-  { label: `gpt-${codexModel}`, run: withCodexRetry(codexRun(diffPath)) },
+  ...(seats.includes('gpt') ? [{ label: `gpt-${codexModel}`, run: withCodexRetry(codexRun(diffPath)) }] : []),
 ]
 
 const answers = (
