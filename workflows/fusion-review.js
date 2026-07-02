@@ -117,19 +117,23 @@ const withCodexRetry = (thunk) => async () => {
 // 0) Capture the diff — it IS the subject. Role panelists are read-only with no Bash, so the diff must
 //    be embedded in their prompt. No diff is a terminal data condition (not a judgment gate): return.
 phase('Capture')
-const diff = await agent(
-  `Run EXACTLY this one read-only Bash command and return its output verbatim — nothing else, and do ` +
-    `NOT wrap it in code fences:\n` +
-    `  git diff --quiet; rc=$?; if [ "$rc" = 0 ]; then echo NO_DIFF; elif [ "$rc" = 1 ]; then F=$(mktemp); ` +
-    `{ git status --short; echo '---DIFF---'; git diff; } > "$F"; printf '===FUSION_DIFF_PATH===%s\\n' "$F"; cat "$F"; ` +
-    `else echo CAPTURE_FAILED; fi`,
-  { model: 'haiku', phase: 'Capture', label: 'capture:diff' }
-)
+const captureOnce = () =>
+  agent(
+    `Run EXACTLY this one read-only Bash command and return its complete stdout verbatim. Your ENTIRE reply ` +
+      `must be a byte-for-byte copy of that stdout, beginning with its VERY FIRST line — which will be either ` +
+      `NO_DIFF, CAPTURE_FAILED, or a line starting with ===FUSION_DIFF_PATH=== (this marker line is REQUIRED ` +
+      `and must be the first line of your reply; never omit, summarize, or replace it). No commentary, no ` +
+      `code fences, no phrases like "output captured above":\n` +
+      `  git diff --quiet; rc=$?; if [ "$rc" = 0 ]; then echo NO_DIFF; elif [ "$rc" = 1 ]; then F=$(mktemp); ` +
+      `{ git status --short; echo '---DIFF---'; git diff; } > "$F"; printf '===FUSION_DIFF_PATH===%s\\n' "$F"; cat "$F"; ` +
+      `else echo CAPTURE_FAILED; fi`,
+    { model: 'haiku', phase: 'Capture', label: 'capture:diff' }
+  )
 // The capture seat saved the snapshot to a temp file and printed a ===FUSION_DIFF_PATH=== marker line
 // FIRST, then the diff. Marker-first is deliberate: if the haiku seat truncates its RETURN on a very large
 // diff, the path still survives at the top, so the GPT seat can still cat the FULL diff from the file (only
 // the role seats' embedded `d` would be short). The marker's presence is the "diff exists" signal.
-const raw = diff ? String(diff).trim() : ''
+let raw = String((await captureOnce()) || '').trim()
 // Capture emits exactly one of: `NO_DIFF` (rc 0), `===FUSION_DIFF_PATH===<path>\n<diff>` (rc 1), or
 // `CAPTURE_FAILED` (git errored, rc>1 — so a git error can't masquerade as a reviewable diff). Match the
 // marker ANCHORED to start-of-line so a diff body that contains the literal string (e.g. reviewing THIS
@@ -137,7 +141,20 @@ const raw = diff ? String(diff).trim() : ''
 // TMPDIR with spaces survives. The marker is the FIRST line, so the first anchored match is the real one.
 // (mktemp yields an alphanumeric path, so the single-quoted '${diffPath}' in the GPT seat is safe; a quote
 // in TMPDIR is not handled.)
-const pm = raw.match(/^===FUSION_DIFF_PATH===(.+)$/m)
+let pm = raw.match(/^===FUSION_DIFF_PATH===(.+)$/m)
+// Relay-bail retry (cf. withCodexRetry — same disease, different seat): observed in real usage on a large
+// diff — the seat RAN the command correctly but its reply was "output captured above" commentary plus a
+// copy MISSING the marker line (and it happened on an opus-pinned seat, so a stronger model is not the
+// fix). Capture is read-only and idempotent, so a marker-less reply gets ONE fresh attempt before the run
+// fails loudly. NO_DIFF is a terminal answer, never retried; CAPTURE_FAILED shares the one retry — a
+// genuine git error repeats and still lands on the throw below.
+let captureRetried = false
+if (!pm && !/^\s*NO_DIFF\s*$/m.test(raw)) {
+  captureRetried = true
+  if (typeof log === 'function') log('fusion-review: capture reply missing the diff-path marker — retrying once')
+  raw = String((await captureOnce()) || '').trim()
+  pm = raw.match(/^===FUSION_DIFF_PATH===(.+)$/m)
+}
 if (!pm) {
   // No marker: ONLY a line that is exactly NO_DIFF is "nothing to review" (line-anchored, not a loose
   // substring, and tolerant of fences/whitespace the haiku seat may add). CAPTURE_FAILED or any other
@@ -272,6 +289,7 @@ try {
     panel: ran,
     gpt_ran: gptRan,
     gpt_retried: gptRetried,
+    capture_retried: captureRetried, // relay-bail base rate (marker-less first reply), cf. gpt_retried
     codexModel,
     codexEffort,
     judge: Object.fromEntries(Object.entries(judge).map(([k, v]) => [k, cap(v)])),
