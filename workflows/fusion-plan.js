@@ -1,7 +1,7 @@
 export const meta = {
   name: 'fusion-plan',
   description:
-    'Deterministic read-only planning council: Claude role panel (architect/skeptic/test/maintainer) + GPT-5.5, judged and synthesized into one implementation plan. Every invocation runs the full pipeline — no skip gate.',
+    'Deterministic read-only planning council: Claude role panel (architect/skeptic/test/maintainer) + GPT-5.5, judged and synthesized into one implementation plan. Every invocation runs the full pipeline — no skip gate. Appends run telemetry to ~/.fusion-council (disable: args.noTelemetry).',
   whenToUse:
     'Before a non-trivial change you choose to vet: architecture decisions, refactors, risky/multi-file edits, unclear bugs. Pass {task}. YOU decide when to run it; it always runs everything.',
   phases: [{ title: 'Context' }, { title: 'Panel' }, { title: 'Judge' }, { title: 'Synthesize' }],
@@ -26,6 +26,12 @@ if (!task || !String(task).trim()) {
 const codexModel = (args && args.codexModel) || 'gpt-5.5'
 const codexEffort = (args && args.codexEffort) || 'high'
 const noContext = !!(args && args.noContext)
+// Eval ablation arm (EVAL.md §C) — default OFF, real usage unaffected. duo = ONE generalist Claude seat
+// + GPT + the same judge/synthesize: the literature-pointed comparator the full role panel must beat.
+const duo = !!(args && args.duo)
+// Disclosed side-effect gate: telemetry (EVAL.md §A) appends run stats to ~/.fusion-council — the ONE
+// write this otherwise read-only workflow performs. Pass noTelemetry:true for a strictly read-only run.
+const noTelemetry = !!(args && args.noTelemetry)
 
 // Read-only guard — belt-and-suspenders on top of each agent's own tool restriction. This is an
 // ANALYSIS workflow; nothing may mutate the repo. (Symmetric with codex's -s read-only below.)
@@ -88,9 +94,13 @@ const codexRun = (prompt) => () =>
 // sentinel — a genuine codex outage stays CODEX_FAIL on the retry too (and is honestly dropped), but a
 // spurious bail usually runs the second time. Each thunk call is a fresh subagent; only the failure path
 // pays the extra attempt.
+// telemetry: the FIRST GPT attempt returned the sentinel, i.e. a retry was ATTEMPTED — the retry may
+// still have failed, so gpt_retried:true can co-occur with gpt_ran:false. Not "retry succeeded".
+let gptRetried = false
 const withCodexRetry = (thunk) => async () => {
   const first = await thunk()
   if (first && String(first).trim() !== CODEX_FAIL) return first
+  gptRetried = true
   // `log` is a host-injected workflow global; guard with typeof so a runtime that lacks it can't throw a
   // ReferenceError on this exact failure path and defeat the retry. (typeof on an undeclared name is safe.)
   if (typeof log === 'function') log('fusion-plan: GPT-5.5 seat returned CODEX_UNAVAILABLE — retrying once')
@@ -142,12 +152,30 @@ const panelPrompt =
 // 1) Panel — 4 Claude role seats (agentType loads each .md's role prompt + read-only tools) + GPT-5.5.
 //    All parallel; the judge needs them together, so a barrier here is correct.
 phase('Panel')
-const ROLES = ['fusion-architect', 'fusion-skeptic', 'fusion-test-strategist', 'fusion-maintainer']
+const ROLES = duo ? [] : ['fusion-architect', 'fusion-skeptic', 'fusion-test-strategist', 'fusion-maintainer']
 const PANEL = [
   ...ROLES.map((r) => ({
     label: r,
     run: () => agent(READ_ONLY + panelPrompt, { agentType: NS + r, phase: 'Panel', label: `panel:${r}` }),
   })),
+  // duo arm: one generalist Claude seat, pinned to opus for arm stability, given the same two-section
+  // shape the GPT seat gets (it has no role .md to supply coverage) so prompt strength is equal.
+  ...(duo
+    ? [
+        {
+          label: 'claude-generalist',
+          run: () =>
+            agent(
+              READ_ONLY +
+                panelPrompt +
+                `\n\nGive TWO terse sections (a few bullets each, not prose): (A) RECOMMENDATION — ` +
+                `recommended approach and how to verify; (B) RISKS — key risks, simpler alternatives, ` +
+                `and what NOT to do.`,
+              { model: 'opus', phase: 'Panel', label: 'panel:claude-generalist' }
+            ),
+        },
+      ]
+    : []),
   { label: `gpt-${codexModel}`, run: withCodexRetry(codexRun(panelPrompt)) },
 ]
 
@@ -168,11 +196,17 @@ const coverage = `Seats: ${ran.join(', ')}. GPT-5.5: ${
 }.`
 
 // 2) Judge — merit comparison, structured so synthesis can branch without re-reading prose.
+// CROSS-FAMILY rule: the 4 Claude role seats share one base model, so their mutual agreement is
+// correlated sampling (same-vendor frontier models agree on ~60% of their joint errors — Kim et al.,
+// ICML 2025), while GPT's unique claims are single-source BY CONSTRUCTION. Without this rule the
+// single-source drop leniency systematically tilts against the council's only cross-family seat and
+// gives a shared Opus misreading multi-source cover. Corroboration = both families, nothing less.
 phase('Judge')
 const judge = await agent(
   READ_ONLY +
     `${panelPrompt}\n\nPanel analyses (JSON):\n${JSON.stringify(answers, null, 2)}\n\n` +
-    `Compare on merit — no panelist is privileged. Extract: consensus; contradictions; uniqueInsights ` +
+    `Compare on merit — no panelist is privileged. Extract: consensus (prefix items BOTH model families ` +
+    `independently raised with [cross-family]); contradictions; uniqueInsights ` +
     `(valuable points only ONE raised — prefix with the panelist); coverageGaps; blindSpots; and ` +
     `invalidClaims (any claim, INCLUDING GPT's, that is wrong, unsupported, or conflicts with the repo/` +
     `constraints — format "panelist: claim — why").\n\n` +
@@ -180,7 +214,11 @@ const judge = await agent(
     `read-only tools to open a cited path:line; tolerate paraphrase, do NOT require a verbatim quote). Put ` +
     `in invalidClaims (format "panelist: claim — ungroundable") any claim about EXISTING code you cannot ` +
     `tie to real code, and be willing to drop a weakly-grounded SINGLE-SOURCE claim this way; NEVER drop a ` +
-    `consensus/cross-model claim for being single-raised. CRITICAL: this is a pre-implementation plan — ` +
+    `claim BOTH model families raised without opening the cited code first. CORROBORATION IS CROSS-FAMILY ` +
+    `ONLY: the Claude role seats share one base model behind different lenses, so Claude-only agreement is ` +
+    `correlated sampling, NOT independent confirmation — hold a Claude-majority claim to the SAME grounding ` +
+    `bar as a single-source one, and never count Claude-seat agreement as evidence against the GPT seat's ` +
+    `single-raised claim. CRITICAL: this is a pre-implementation plan — ` +
     `NEVER mark a forward-looking "should add/change X" recommendation ungroundable just because the target ` +
     `code does not exist yet. Default-to-invalidClaims on uncertainty applies ONLY to concrete claims about ` +
     `existing code — never to recommendations or judgment calls.`,
@@ -208,5 +246,67 @@ const plan = await agent(
     `## Do Not Do\n## Open Questions\n## Council Coverage  (${coverage})`,
   { model: 'opus', phase: 'Synthesize', label: 'synthesize' }
 )
+
+// 4) Telemetry (observational eval, EVAL.md §A) — fail-open; must NEVER break or gate a run.
+// The runtime has no fs/process/Date/timers, so ONE seat appends the row via a QUOTED heredoc; the
+// SHELL supplies ts/cwd/run_id. `jq -e` validates the row BEFORE append — that guards WELL-FORMEDNESS,
+// not fidelity (a copy that stays valid JSON but alters a value is not detectable here; the workflow
+// journal keeps ground truth). A copy that fails validation appends a tiny fixed {dropped:true} stub
+// instead, so the large-run drop bias stays measurable. Appends take a bounded mkdir lock (≤5s, then
+// best-effort) because bench arms run councils in parallel and a judge-sized line exceeds the atomic-
+// append boundary. Row is compact (judge entries capped at 500 chars, per-seat counts, NOT full
+// answers — the journal keeps those). Single-line JSON means a literal FUSION_TELEMETRY_EOF inside the
+// data can't terminate the heredoc (needs its own line). One retry on a missing TELEMETRY_OK (the seat
+// can spuriously bail like the codex wrapper; a retry after a BAD may leave stub+row — visible, benign).
+// No hard timeout is possible here (no timers) — a hung seat is bounded by the harness agent lifecycle.
+// DESCRIPTIVE data only (the judge is the scorer — circular); never a kill-metric input on its own.
+if (!noTelemetry)
+try {
+  const cap = (v) => (Array.isArray(v) ? v.map((s) => String(s).slice(0, 500)) : v)
+  const row = JSON.stringify({
+    workflow: 'fusion-plan',
+    arm: duo ? 'duo' : 'full', // eval arm — joins bench runs to telemetry
+    panel: ran,
+    gpt_ran: gptRan,
+    gpt_retried: gptRetried,
+    codexModel,
+    codexEffort,
+    judge: Object.fromEntries(Object.entries(judge).map(([k, v]) => [k, cap(v)])),
+    coverage,
+    seats: answers.map((a) => ({
+      panelist: a.panelist,
+      chars: String(a.analysis).length,
+      // bullet/numbered lines ≈ claim count: the survival-per-claim denominator (Goodhart guard)
+      claims: String(a.analysis)
+        .split('\n')
+        .filter((l) => /^\s*([-*•]|\d+[.)])\s/.test(l)).length,
+    })),
+    subject_head: String(task).slice(0, 200),
+  })
+  const send = () =>
+    agent(
+      `Append one telemetry row. Run this command verbatim. The heredoc body is ONE single line of JSON — ` +
+        `copy it EXACTLY, character-for-character, no reformatting:\n` +
+        `  F=$(mktemp); cat > "$F" <<'FUSION_TELEMETRY_EOF'\n` +
+        `${row}\n` +
+        `FUSION_TELEMETRY_EOF\n` +
+        `  D="$HOME/.fusion-council"; mkdir -p "$D"; RID="$(date -u +%s)-$$-$RANDOM"\n` +
+        `  for i in $(seq 1 50); do mkdir "$D/.lock" 2>/dev/null && break; sleep 0.1; done\n` +
+        `  if jq -e . "$F" >/dev/null 2>&1; then jq -c --arg ts "$(date -u +%FT%TZ)" --arg cwd "$PWD" ` +
+        `--arg rid "$RID" '. + {ts:$ts,cwd:$cwd,run_id:$rid}' "$F" >> "$D/telemetry.jsonl" && echo TELEMETRY_OK; ` +
+        `else jq -cn --arg ts "$(date -u +%FT%TZ)" --arg cwd "$PWD" --arg rid "$RID" ` +
+        `'{dropped:true,workflow:"fusion-plan",ts:$ts,cwd:$cwd,run_id:$rid}' >> "$D/telemetry.jsonl"; ` +
+        `echo TELEMETRY_BAD; fi\n` +
+        `  rmdir "$D/.lock" 2>/dev/null; rm -f "$F"\n` +
+        `Return ONLY the command's final output line.`,
+      { model: 'sonnet', phase: 'Synthesize', label: 'telemetry' }
+    )
+  let ack = await send()
+  if (!/TELEMETRY_OK/.test(String(ack))) ack = await send()
+  if (!/TELEMETRY_OK/.test(String(ack)) && typeof log === 'function')
+    log('fusion-plan: telemetry row dropped (seat did not confirm a valid append)')
+} catch (e) {
+  if (typeof log === 'function') log('fusion-plan: telemetry skipped: ' + e)
+}
 
 return { plan, judge, coverage, panel: ran, contextInjected: ctx !== '(no extra context resolved)' }
