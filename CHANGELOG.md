@@ -1,5 +1,25 @@
 # Changelog
 
+## 0.1.10
+
+Harden the `fusion-review` capture seat against a flaky failure, and add an empirical benchmark that
+measures the council instead of asserting its value.
+
+- **Fix: retry + lenient parse in the capture seat.** The haiku capture seat occasionally dropped the
+  `===FUSION_DIFF_PATH===` marker line (echoing the diff body but stripping the "preamble" marker), which
+  threw `capture produced neither a diff-path marker nor NO_DIFF` mid-run. Capture now retries up to 3x and,
+  if the marker is gone but the diff body survived (`---DIFF---` present), reviews it anyway (the GPT seat,
+  which needs the temp-file path, then honestly reports UNAVAILABLE). Only a clean `NO_DIFF` is "nothing to
+  review"; a persistently unparseable result still throws. Applies to `fusion-review`.
+- **Add: `bench/` — an empirical review benchmark.** A reusable harness (leak-free case reconstruction,
+  real shipped-path runs, blind quote-required grading cross-validated 12/12 by a GPT-5.5 grader) that
+  measures whether the council out-detects a single strong model, whether the GPT-5.5 seat adds value, and
+  at what cost. See `bench/README.md`. Directional early findings (small n): single-opus matches the council
+  on focused diffs; the council's recall edge is on large diffs; the GPT-5.5 seat showed no measurable
+  benefit. Case datasets are derived from a private repo and are gitignored.
+- **Add: bench-only `args.seats` roster param in `fusion-review`.** Lets the benchmark drop the GPT seat for
+  the claude-only ablation. Not exposed via the skill; no-args behavior is byte-identical to before.
+
 ## 0.1.9
 
 Sharpen the single GPT-5.5 seat's prompt instead of adding seats. We evaluated splitting GPT into two

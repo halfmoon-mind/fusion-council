@@ -51,8 +51,17 @@ CLI just shows up as UNAVAILABLE in Council Coverage.
 agents/                           5 read-only role agents (Read/Glob/Grep only)
 skills/fusion-plan, fusion-review entry points (call the workflows by path)
 workflows/*.js                    the orchestration (bundled; called via ${CLAUDE_PLUGIN_ROOT})
+bench/                            empirical review benchmark (harness + README; case data gitignored)
 ```
 
 Workflows aren't an auto-loaded plugin component, so the skills invoke them by
 `scriptPath` under `${CLAUDE_PLUGIN_ROOT}` — they ship as bundled data, not as a
 registered-by-name workflow.
+
+## Benchmark
+
+`bench/` **measures** the council instead of asserting its value — methodology and results in
+[`bench/README.md`](bench/README.md). Directional early findings (small sample, not proven): on
+small/focused diffs a single strong model matches the council on bug detection (the council mainly
+adds blast-radius depth, at higher cost); the council's recall edge shows up on large diffs; the
+GPT-5.5 seat showed no measurable benefit in these runs.
