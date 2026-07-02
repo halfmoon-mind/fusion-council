@@ -43,6 +43,17 @@ Codex CLI to enable it. The seat hands its prompt to `codex exec` on **stdin**
 needs a Codex CLI recent enough to support it (verified on v0.142.0); an older
 CLI just shows up as UNAVAILABLE in Council Coverage.
 
+## Telemetry & self-evaluation
+
+Each run appends one compact stats row (the judge JSON, per-seat claim counts,
+coverage — never full seat answers) to `~/.fusion-council/telemetry.jsonl`, so the
+council's own value is measurable from real usage: per-seat surviving insights,
+FP rate, cross-family agreement, and whether you actually acted on the output
+(`eval/ack.sh y|n`). `eval/analyze.sh` prints the scoreboard. This is the ONE
+write the otherwise read-only workflows perform — pass `noTelemetry: true` to
+disable it. The full validation methodology (verified literature, seeded-bug
+benchmark design, ablation arms `noGpt`/`duo`, kill metrics) lives in `EVAL.md`.
+
 ## Layout
 
 ```
@@ -51,6 +62,7 @@ CLI just shows up as UNAVAILABLE in Council Coverage.
 agents/                           5 read-only role agents (Read/Glob/Grep only)
 skills/fusion-plan, fusion-review entry points (call the workflows by path)
 workflows/*.js                    the orchestration (bundled; called via ${CLAUDE_PLUGIN_ROOT})
+EVAL.md, eval/                    validation methodology + telemetry scoreboard scripts
 ```
 
 Workflows aren't an auto-loaded plugin component, so the skills invoke them by

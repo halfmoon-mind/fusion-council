@@ -1,5 +1,43 @@
 # Changelog
 
+## 0.1.11
+
+Make the council **measure itself** instead of arguing from vibes. A two-round adversarially-verified
+literature sweep (recorded in `EVAL.md`) said the honest answer to "is a 4-Claude + 1-GPT council worth it?"
+is *conditional*: cross-family membership and a grounded judge are the two mechanisms the evidence supports;
+role-seat fan-out and merge-style synthesis are unvalidated; and the judge's single-source drop rule was
+structurally tilted against the council's only cross-family seat (GPT's unique claims are single-source BY
+CONSTRUCTION, while same-family Opus seats hand each other multi-source cover — same-vendor frontier models
+agree on ~60% of their joint errors, Kim et al. ICML 2025). This release fixes the tilt and lands the
+instrumentation + ablation arms that let real usage and a seeded-bug bench settle the rest.
+
+- **Change: judge corroboration is CROSS-FAMILY ONLY (both workflows).** Claude-only agreement is
+  correlated sampling, not independent confirmation: a Claude-majority claim now gets the SAME grounding
+  bar as a single-source one, Claude-seat agreement never counts against the GPT seat's single-raised
+  claim, and (review) GPT's findings are judged against the diff it actually saw. The judge also tags
+  consensus items both families independently raised with `[cross-family]`, so error-decorrelation is
+  measurable from telemetry.
+- **Add: run telemetry (observational self-eval, `EVAL.md` §A).** After Synthesize, one sonnet seat
+  appends a compact row (judge JSON capped at 500 chars/entry, per-seat `{chars, claims}`, coverage,
+  `arm`, `gpt_ran`/`gpt_retried`, `subject_head`) to `~/.fusion-council/telemetry.jsonl`. The workflow
+  runtime has no fs/Date/timers, so the SHELL supplies `ts`/`cwd`/`run_id`; `jq -e` validates before
+  append (well-formedness, not fidelity — journals keep ground truth); a failed copy appends a
+  `{dropped:true}` stub so drop bias stays measurable; appends take a bounded mkdir lock (bench arms run
+  in parallel); fail-open + one retry — telemetry can never break or gate a run. **`args.noTelemetry`
+  disables it**; the write is disclosed in both meta descriptions since it is the one write these
+  otherwise read-only workflows perform.
+- **Add: `eval/analyze.sh` + `eval/ack.sh`.** Per-seat scoreboard from real usage (surviving
+  uniqueInsights per run/claim, decisive-run rate, FP rate, `[cross-family]` consensus rate, dropped
+  rows) and a one-keystroke acted-on annotation — the only non-circular observational signal.
+- **Add: eval ablation args — `noGpt` (review) and `duo` (both workflows).** `duo` = ONE generalist opus
+  seat + GPT + the same judge/synthesize: the literature-pointed comparator the full role panel must beat
+  (~half cost). Default OFF; telemetry rows carry the `arm` so bench runs join cleanly.
+- **Add: `EVAL.md` — the validation methodology.** Verified research (both sweeps + corrections),
+  observational first-cut over 104 historical judge outputs, the seeded-defect benchmark design (4 arms),
+  blinded plan A/B with a non-panel-family grader, kill metrics with statistical guardrails, and the
+  11-flaw methodology attack. A live fusion-review run of this very diff validated the telemetry seat and
+  contributed 6 fixes (lock, stub, run_id, opt-out, kill-match containment, comment honesty).
+
 ## 0.1.10
 
 Give `fusion-review` a first-class **Open Questions** section so the honest-recall signal the judge already
