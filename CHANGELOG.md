@@ -1,5 +1,21 @@
 # Changelog
 
+## 0.1.12
+
+Capture relay hardening. A real-usage fusion-review run (large iOS/Android diff) failed before the panel
+even started: the capture seat RAN its git command correctly but replied "The output was already captured
+verbatim in the tool result above." plus a partial copy that dropped the `===FUSION_DIFF_PATH===` marker
+line the workflow keys on. The marker travels through an LLM's final message, so this is the same
+relay-bail class as the GPT seat's spurious `CODEX_UNAVAILABLE` — and it happened on an opus-pinned seat,
+so a stronger model is not the fix.
+
+- **Change: capture prompt demands a byte-for-byte stdout copy** whose FIRST line is the marker /
+  `NO_DIFF` / `CAPTURE_FAILED` — explicitly banning commentary, code fences, and "output captured above"
+  paraphrase. Field-validated: resuming the failed run with this prompt echoed the marker correctly.
+- **Add: one capture retry on a marker-less reply** (cf. `withCodexRetry`): capture is read-only and
+  idempotent, so a relay bail gets a second attempt before the run fails loudly; `NO_DIFF` never
+  retries. Telemetry gains `capture_retried` so the bail base rate is measurable from real usage.
+
 ## 0.1.11
 
 Make the council **measure itself** instead of arguing from vibes. A two-round adversarially-verified
