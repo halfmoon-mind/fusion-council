@@ -10,8 +10,14 @@ export const meta = {
 // Plugin-shipped subagents are namespaced <plugin>:<agent>. Bare names won't resolve once installed.
 const NS = 'fusion-council:'
 
-// Accept Workflow({args:"task text"}) or Workflow({args:{task}}).
-const task = typeof args === 'string' ? args : args?.task
+// Accept Workflow({args:"task text"}) or Workflow({args:{task}}). Headless orchestrators sometimes pass
+// args as a JSON-ENCODED STRING (observed in fusion-review: flags silently ignored) — normalize first;
+// a plain task string never starts with '{', so this cannot eat a real task.
+let A = args
+if (typeof A === 'string' && A.trim().startsWith('{')) {
+  try { A = JSON.parse(A) } catch (e) { /* not JSON — treat as task text */ }
+}
+const task = typeof A === 'string' ? A : A?.task
 if (!task || !String(task).trim()) {
   throw new Error('fusion-plan: missing args.task (pass the change you want planned)')
 }
@@ -23,15 +29,15 @@ if (!task || !String(task).trim()) {
 // merit drop. One honest single-source seat avoids that; depth comes from the two prompt sections instead.
 // ChatGPT sub only runs gpt-5.5 / gpt-5.4; 'high' = near-xhigh quality but ~1.6x faster on long tasks
 // (measured A/B, identical input), so it's the default; pass codexEffort:'xhigh' for the hardest, 'low' for raw speed.
-const codexModel = (args && args.codexModel) || 'gpt-5.5'
-const codexEffort = (args && args.codexEffort) || 'high'
-const noContext = !!(args && args.noContext)
+const codexModel = (A && A.codexModel) || 'gpt-5.5'
+const codexEffort = (A && A.codexEffort) || 'high'
+const noContext = !!(A && A.noContext)
 // Eval ablation arm (EVAL.md §C) — default OFF, real usage unaffected. duo = ONE generalist Claude seat
 // + GPT + the same judge/synthesize: the literature-pointed comparator the full role panel must beat.
-const duo = !!(args && args.duo)
+const duo = !!(A && A.duo)
 // Disclosed side-effect gate: telemetry (EVAL.md §A) appends run stats to ~/.fusion-council — the ONE
 // write this otherwise read-only workflow performs. Pass noTelemetry:true for a strictly read-only run.
-const noTelemetry = !!(args && args.noTelemetry)
+const noTelemetry = !!(A && A.noTelemetry)
 
 // Read-only guard — belt-and-suspenders on top of each agent's own tool restriction. This is an
 // ANALYSIS workflow; nothing may mutate the repo. (Symmetric with codex's -s read-only below.)
@@ -43,7 +49,7 @@ const READ_ONLY =
 // unsupported claim lands here so synthesis drops it — no source privileged, no source force-included.
 const JUDGE_SCHEMA = {
   type: 'object',
-  required: ['consensus', 'contradictions', 'uniqueInsights', 'coverageGaps', 'blindSpots', 'invalidClaims'],
+  required: ['consensus', 'contradictions', 'uniqueInsights', 'coverageGaps', 'blindSpots', 'invalidClaims', 'correctedFindings'],
   additionalProperties: false,
   properties: {
     consensus: { type: 'array', items: { type: 'string' } },
@@ -52,6 +58,10 @@ const JUDGE_SCHEMA = {
     coverageGaps: { type: 'array', items: { type: 'string' } },
     blindSpots: { type: 'array', items: { type: 'string' } },
     invalidClaims: { type: 'array', items: { type: 'string' } }, // "panelist: claim — why it's wrong"
+    // Judge-authored positive findings implied by refuting an EXCULPATORY claim. Synthesis drops
+    // invalidClaims, so without this field the judge's own insight inside a refutation is lost
+    // (measured in the review council's bench, 2026-07-14; same gate structure here).
+    correctedFindings: { type: 'array', items: { type: 'string' } },
   },
 }
 
@@ -209,7 +219,10 @@ const judge = await agent(
     `independently raised with [cross-family]); contradictions; uniqueInsights ` +
     `(valuable points only ONE raised — prefix with the panelist); coverageGaps; blindSpots; and ` +
     `invalidClaims (any claim, INCLUDING GPT's, that is wrong, unsupported, or conflicts with the repo/` +
-    `constraints — format "panelist: claim — why").\n\n` +
+    `constraints — format "panelist: claim — why"); and correctedFindings (JUDGE-AUTHORED: whenever an ` +
+    `invalidClaims entry refutes an EXCULPATORY claim — "this approach is fine/safe/already handled" — state ` +
+    `the corrected concrete point your refutation implies, format "file:line or topic — point — why", so that ` +
+    `knowledge survives the invalidClaims exclusion; [] when no refutation implies one).\n\n` +
     `GROUNDING: verify only DESCRIPTIVE premises — that cited CURRENT code exists as claimed (use your ` +
     `read-only tools to open a cited path:line; tolerate paraphrase, do NOT require a verbatim quote). Put ` +
     `in invalidClaims (format "panelist: claim — ungroundable") any claim about EXISTING code you cannot ` +
@@ -235,7 +248,8 @@ const plan = await agent(
     `that survived invalidClaims (do NOT drop a surviving point merely for being single-source, and do NOT ` +
     `re-litigate the judge's merit calls; you MAY drop only an item that directly contradicts the repo/` +
     `constraints or would break the output contract, listing it under "Dropped claims" with the reason), ` +
-    `fill coverageGaps, avoid blindSpots, and ` +
+    `treat every correctedFindings item as a surviving judge-raised insight (incorporate it; never drop it ` +
+    `with the invalidClaims it came from), fill coverageGaps, avoid blindSpots, and ` +
     `EXCLUDE everything in invalidClaims (list each dropped claim + reason under "Dropped claims"). ` +
     `Prefer the smallest safe change. This is a PLAN ONLY — do not implement.\n\n` +
     `Output EXACTLY this structure:\n` +

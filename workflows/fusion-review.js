@@ -10,18 +10,24 @@ export const meta = {
 // Plugin-shipped subagents are namespaced <plugin>:<agent>. Bare names won't resolve once installed.
 const NS = 'fusion-council:'
 
-const codexModel = (args && args.codexModel) || 'gpt-5.5'
+// Headless orchestrators sometimes pass args as a JSON-ENCODED STRING (observed: bench arm silently
+// degraded to full because "{\"noGpt\": true}".noGpt is undefined). Normalize ONCE before any flag read.
+let A = args
+if (typeof A === 'string' && A.trim().startsWith('{')) {
+  try { A = JSON.parse(A) } catch (e) { /* not JSON — leave as-is */ }
+}
+const codexModel = (A && A.codexModel) || 'gpt-5.5'
 // 'high' = near-xhigh quality but ~1.6x faster on long tasks (measured A/B); pass codexEffort:'xhigh' for the hardest.
-const codexEffort = (args && args.codexEffort) || 'high'
+const codexEffort = (A && A.codexEffort) || 'high'
 // Eval ablation arms (EVAL.md §B) — both default OFF, real usage unaffected. noGpt = council minus the
 // GPT seat (the GPT-marginal arm). duo = ONE generalist Claude seat + GPT + the same judge/synthesize:
 // the literature-pointed comparator the full role panel must beat (~half cost, same two mechanisms the
 // evidence actually supports — cross-family seat + grounded judge).
-const noGpt = !!(args && args.noGpt)
-const duo = !!(args && args.duo)
+const noGpt = !!(A && A.noGpt)
+const duo = !!(A && A.duo)
 // Disclosed side-effect gate: telemetry (EVAL.md §A) appends run stats to ~/.fusion-council — the ONE
 // write this otherwise read-only workflow performs. Pass noTelemetry:true for a strictly read-only run.
-const noTelemetry = !!(args && args.noTelemetry)
+const noTelemetry = !!(A && A.noTelemetry)
 
 const READ_ONLY =
   'You are in read-only deliberation mode. You MAY read files, but you MUST NOT create, modify, or ' +
@@ -41,7 +47,7 @@ const REVIEW_FRAMING =
 // Same merit schema as fusion-plan: invalidClaims lets synthesis drop any panelist's weak finding.
 const JUDGE_SCHEMA = {
   type: 'object',
-  required: ['consensus', 'contradictions', 'uniqueInsights', 'coverageGaps', 'blindSpots', 'invalidClaims'],
+  required: ['consensus', 'contradictions', 'uniqueInsights', 'coverageGaps', 'blindSpots', 'invalidClaims', 'correctedFindings'],
   additionalProperties: false,
   properties: {
     consensus: { type: 'array', items: { type: 'string' } },
@@ -50,6 +56,10 @@ const JUDGE_SCHEMA = {
     coverageGaps: { type: 'array', items: { type: 'string' } },
     blindSpots: { type: 'array', items: { type: 'string' } },
     invalidClaims: { type: 'array', items: { type: 'string' } }, // "panelist: claim — why it's wrong"
+    // Judge-authored positive findings implied by refuting an EXCULPATORY claim. Synthesize excludes
+    // invalidClaims wholesale, so without this field the judge's own bug-knowledge inside a refutation
+    // is an information sink (measured: bench 2026-07-14, a real seeded bug lost exactly this way).
+    correctedFindings: { type: 'array', items: { type: 'string' } },
   },
 }
 
@@ -227,7 +237,10 @@ const judge = await agent(
     `independently raised with [cross-family]); contradictions; uniqueInsights ` +
     `(real issues only ONE caught — prefix with the panelist); coverageGaps; blindSpots; and ` +
     `invalidClaims (any finding, INCLUDING GPT's, that is wrong, out of scope, or unsupported by the ` +
-    `diff — format "panelist: finding — why").\n\n` +
+    `diff — format "panelist: finding — why"); and correctedFindings (JUDGE-AUTHORED: whenever an ` +
+    `invalidClaims entry refutes an EXCULPATORY claim — "this change is fine/safe/consistent" — assert the ` +
+    `corrected concrete finding your refutation implies, format "file:line — issue — why", so that knowledge ` +
+    `survives the invalidClaims exclusion; [] when no refutation implies one).\n\n` +
     `GROUNDING: for every finding that cites a path:line or describes specific code, confirm it against the ` +
     `diff above; use your read-only tools to open the cited file ONLY if it is not in the diff. Ground on ` +
     `whether the citation EXISTS and CONCERNS that code — tolerate paraphrase, do NOT require a verbatim ` +
@@ -255,9 +268,14 @@ const review = await agent(
     `Write ONE review report. Keep consensus, preserve every uniqueInsight that survived invalidClaims (do ` +
     `NOT drop a finding merely for being single-source, and do NOT re-litigate the judge's merit calls; you ` +
     `MAY silently drop only an item that directly contradicts the diff or would break the output contract), ` +
+    `include every correctedFindings item under "## Findings" (Raised by: judge), ` +
     `route coverageGaps/blindSpots — plus any unstated assumptions or unspecified requirements the diff ` +
     `leaves open — into the "## Open Questions" section as QUESTIONS (that section ASKS; it must not assert ` +
-    `a finding you cannot ground, so it never adds false positives), and silently EXCLUDE everything in ` +
+    `a finding you cannot ground, so it never adds false positives). NEVER DEMOTE AN ASSERTION: a consensus/` +
+    `uniqueInsights/correctedFindings item that asserts a CONCRETE defect (cites code and a mechanism) MUST ` +
+    `appear under "## Findings" as an assertion — do not rephrase it into a question or file it under Test ` +
+    `Gaps/Open Questions (measured failure mode: a real panel-raised bug demoted to Open Questions and lost). ` +
+    `Open Questions is ONLY for genuinely interrogative items. Silently EXCLUDE everything in ` +
     `invalidClaims (do NOT add a dropped-claims section; keep the exact output structure below). Only ` +
     `actionable findings. Do not edit files.\n\n` +
     `Output EXACTLY this structure:\n` +
