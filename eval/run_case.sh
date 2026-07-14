@@ -47,7 +47,9 @@ while :; do
   T0=$(date +%s)
   case $ARM in
     full|nogpt|duo)
-      ARGS='{}'; [ "$ARM" = nogpt ] && ARGS='{"noGpt":true}'; [ "$ARM" = duo ] && ARGS='{"duo":true}'
+      # duo is the workflow default since 0.2.0; full/nogpt opt back into the role panel via roles:true.
+      # duo still sends the legacy no-op flag so this mapping stays valid against pre-0.2.0 workflows.
+      ARGS='{"roles":true}'; [ "$ARM" = nogpt ] && ARGS='{"roles":true,"noGpt":true}'; [ "$ARM" = duo ] && ARGS='{"duo":true}'
       RV="$W/.fusion-bench-review.md"
       PROMPT="Call the Workflow tool EXACTLY ONCE with {\"scriptPath\":\"$WF\",\"args\":$ARGS}. Do not review the code yourself. Then use the Write tool to save the returned 'review' field EXACTLY, in full, to $RV . Reply with only the single word DONE."
       ENV=$(run_claude "$W" "$PROMPT" "")

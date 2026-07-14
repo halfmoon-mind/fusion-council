@@ -167,7 +167,8 @@ Verify after the next real run: `wc -l ~/.fusion-council/telemetry.jsonl` and `e
 ts            ISO timestamp (shell-supplied at append time)
 run_id        unique per append (epoch-pid-random; the join/dedup key — ts alone collides within a second)
 workflow      "fusion-plan" | "fusion-review"
-arm           "full" | "nogpt" | "duo" — eval ablation arm (default "full")
+arm           "duo" | "full" | "nogpt" | "duo-nogpt" — ACTUAL panel configuration (review default
+              "duo" since 0.2.0, "full" before; "nogpt" = roles+noGpt, the historical arm)
 cwd           repo the run happened in (shell $PWD; joins bench runs to cases)
 panel         e.g. ["fusion-architect","fusion-skeptic","fusion-test-strategist","fusion-maintainer","gpt-gpt-5.5"]
 gpt_ran       bool (seat label is literally "gpt-gpt-5.5" = `gpt-${codexModel}`)
@@ -246,7 +247,9 @@ Coverage honestly reports "UNAVAILABLE" for `noGpt` runs; that's fine and self-d
 
 ### B3. Running (scratch repo per case × 4 arms)
 
-`run_case.sh`:
+`run_case.sh` (ORIGINAL DESIGN DRAFT — superseded by the shipped `eval/run_case.sh`, which carries the
+§3 fixes AND, since 0.2.0, the flipped default: the full/nogpt arms must send `{"roles":true}` /
+`{"roles":true,"noGpt":true}` because a bare skill invoke or `{noGpt:true}` now runs duo/duo-nogpt):
 
 ```bash
 #!/usr/bin/env bash
@@ -357,6 +360,43 @@ PRIMARY metrics, in order: (1) **clean-case FP floor** per arm (findings on accu
 **FIRST FULL §B5′ READ (2026-07-14, 9 settled cases × 5 arms; FINAL — 006 was later discarded, see below):** per-arm (mean cost/run · mean extra findings on bug cases · clean-diff findings/run · SNR proxy): full $2.83 · 4.2 · 3.5 · 0.16; nogpt $2.65 · 1.8 · 3.25 · 0.36; duo $2.16 · 2.2 · 3.25 · 0.27; solo-k $1.05 · 3.0 · 5.25 · 0.25; solo $0.38 · 2.17 · 2.75 · 0.28. Easy-anchor recall 4/4 everywhere (ceiling as designed). On the ONE settled hard case (026): nogpt and solo-k CAUGHT it; **full and duo LOST it inside their own machinery** — verified by reading the artifacts, not just the attributor: (a) full's panel+judge had it, but synthesis routed it into `## Open Questions`/`## Test Gaps` instead of asserting a Finding (the v0.1.10 asks-don't-assert design demoting a true positive — a hit-based grader scores it a miss; a human reader would arguably still be warned); (b) duo's judge demonstrably UNDERSTOOD the bug (its invalidClaims entry refutes the generalist's it's-fine claim by articulating the exact divergence) but that knowledge lived only inside a refutation, and synthesis excludes invalidClaims by design → the report never asserts it (the v0.1.6 single-gate FP design turning judge-refutation text into an information sink). BOTH are D2-class judge/synth-harm events on n=1 — anecdote, but each traced to a specific prompt-contract line, and both are fixable by ROUTING (e.g. judge emits a `correctedFindings` list when refuting an exculpatory claim; synthesis promotes judge-corroborated risks to Findings) rather than by re-weighting seats. Wall-clock note: full mean is skewed by one 7326s attempt-2 outlier (019); typical council run ≈ 250–370s. All numbers descriptive; n far below any §3 kill bar.
 
 **Solo-saturation REPLICATED on untested paths (2026-07-14, repro protocol):** 8 more hard cases built on spec-uncovered paths (verified by injected repro specs, 5 repos total). Solo caught 4/4 at v1 and 7/8 after a harden round; sole survivor 026 (Dart: an aggregation helper binds two distinct totals to the same source field — the same identity-confusion class as 006). CUMULATIVE across both protocols: **20 hard-bug attempts → 2 survivors (006, 026); solo recall on deliberately-hardened, verified-real bugs ≈ 90%** regardless of test coverage. The discriminative-recall region at ~150-line diff scale is nearly empty; §B5′'s precision/noise/cost primacy is now the load-bearing measurement. POSTSCRIPT (2026-07-14, after a cross-agent write collision forced a rebuild): 006's rebuilt AND once-hardened versions were BOTH caught by solo — on the hardened version it reasoned out the key-space mismatch with every cheap side-by-side heuristic closed — so 006 was discarded per the admission rule. **The hard subset is n=1 (026 only)** — treat every hard-recall delta as anecdote. Final active set: 9 cases — 5 mutations (001–004 anchors + 026) + 4 accuracy-audited cleans (005, 018–020); ~20 discards in `cases/_rejected/`.
+
+**§B5′ RE-VALIDATION POST-v0.1.13 (2026-07-14, duo+full re-run on the 9 settled cases, ~$38 recorded):**
+pre-patch duo/full rows were quarantined to `results/*.stale-pre0113-duofull.jsonl` (quarantine is what
+lets run_bench's resume-skip re-run them); both arms re-ran with the correctedFindings / never-demote
+routing fixes live; nogpt/solo/solo-k rows remain pre-patch. Headline: **both arms now catch 026** —
+artifact-verified against the review texts, not just the grader: the duo report asserts the exact
+two-line denominator swap as a High cross-family-consensus Finding (the judge-refutation information
+sink is fixed — that knowledge previously died inside `invalidClaims`), and the full report asserts it
+as a High Finding instead of demoting it to Open Questions (the never-demote fix working) — though full
+hedges toward "the swap is likely correct" (the wrong lean) while duo stays neutral on which side is
+authoritative. Per-arm raw (mean cost/run · noise on bug cases · clean-diff findings/run · SNR proxy):
+duo $1.85 · 2.2 · 2.0 · 0.31; full $2.34 · 2.0 · 4.75 · 0.33 (wall 274s vs 330s; gpt_ran 9/9 both;
+excluded_d1 0). Raw numbers put full ahead on noise/SNR by ≤0.2 findings/run — but the §3 #10 hand
+audit of the piles found the sonnet enumerator inconsistently counts SECTION items as findings:
+019/full's pile holds 5 phantom entries (Test Gap / Scope Check / Open Question lines) and 002/duo's
+holds 3 Open-Question items. Counting asserted non-truth findings only: clean floor duo 2.0 vs full
+~3.5; bug-case noise duo ~1.0 vs full ~1.6–2.0; SNR duo ~0.50 vs full ~0.38. Under either counting duo
+wins the §B5′ #1 metric (clean-FP floor) and cost decisively and ties recall everywhere (easy 4/4
+both, hard 1/1 both); the noise/SNR deltas sit inside demonstrated grader inconsistency. GATE
+(pre-registered: duo ≥ full on SNR/noise/clean-FP/cost, else stop): **PASS** on the normalized read,
+with the raw shortfalls documented here rather than hidden. Also notable: the v0.1.13 routing fixes
+helped FULL more than duo (full noise 4.2→2.0, SNR 0.16→0.33 vs its pre-patch read) — the routing
+bugs, not the panel, were most of full's §B5′ pathology.
+
+**DEFAULT SWITCH (v0.2.0, 2026-07-14): `fusion-review` defaults to duo.** This is NOT a D3 kill (hard
+subset is n=1; §3 gray zones apply) — it is a REVERSIBLE default flip on §B5′ precision/cost primacy,
+with the role panel intact behind `args.roles: true` and `fusion-plan` untouched (§C plan A/B never
+ran — no data, no change). Telemetry `arm` records the ACTUAL configuration: default run = 'duo',
+roles = 'full', roles+noGpt = 'nogpt' (the historical arm), noGpt alone = 'duo-nogpt'. **Reversion
+criteria (pre-registered):** restore the full-panel default if EITHER (a) the acted-on rate
+(`eval/ack.sh`) over ≥10 post-switch duo runs falls clearly below the full-era baseline, or (b) TWO
+independent real-usage misses are attributed to the missing role panel — a real defect a default duo
+run failed to assert that a `roles:true` re-run of the same diff asserts (journal/telemetry-verified,
+not vibes), or (c) a §3-guarded bench extension shows duo losing hard-subset recall or the clean-FP
+floor to full outside the gray zone. **Habit:** after each real fusion-review, annotate
+`eval/ack.sh y|n` — the acted-on rate is the only non-circular online signal and is criterion (a)'s
+denominator.
 
 ## 3) Methodology attack — flaws in the harness above and required fixes
 
