@@ -1,5 +1,37 @@
 # Changelog
 
+## 0.1.13
+
+Two classes of measured signal loss, found by the new seeded-defect bench (EVAL.md §B5′), plus the
+bench harness itself. The headline product bug: headless orchestrators sometimes pass Workflow `args`
+as a JSON-encoded STRING, so `"{\"noGpt\": true}".noGpt` is undefined and both workflows silently
+ignored their ablation flags — every "nogpt"/"duo" bench run secretly executed as full until the
+telemetry `arm` field exposed it.
+
+- **Fix: normalize string `args` in both workflows.** A JSON-looking string arg is parsed before any
+  flag read; a plain task string still works for `fusion-plan`. The bench runner also asserts
+  requested-arm == telemetry-arm and retries, so a recurrence is loud, not silent.
+- **Add: `correctedFindings` in both judge schemas.** Synthesis excludes `invalidClaims` wholesale, so
+  a judge refutation of an EXCULPATORY claim ("this change is fine") was an information sink — the
+  bench measured a real seeded bug lost exactly this way (the judge articulated the defect inside its
+  refutation; the report never asserted it). The judge now emits the corrected positive finding as a
+  first-class item; review synthesize includes it under Findings (Raised by: judge), plan synthesize
+  treats it as a surviving insight.
+- **Change: review synthesize may never demote an assertion.** A consensus/uniqueInsights/
+  correctedFindings item asserting a concrete defect must land in `## Findings` — not be rephrased
+  into Open Questions/Test Gaps (the second measured loss: a panel-raised true bug demoted to a
+  question by the 0.1.10 asks-don't-assert routing). Open Questions stays interrogative-only.
+- **Add: seeded-defect bench harness** (`eval/run_case.sh`, `grade_case.sh`, `run_bench.sh`,
+  `bench_report.sh`): scratch clones with scrubbed git history, five arms (full / nogpt / duo / solo /
+  solo-k with an equalized dimension checklist), gpt_ran + arm integrity gates, wall-clock + cost per
+  run, decoy-cited findings routed to an audit pile (never auto-FP), resume-safe reruns, and the §B5′
+  per-arm scoreboard. `eval/cases/` and `eval/results/` are gitignored — they can embed private-repo
+  code and must never publish.
+- **Docs: EVAL.md** records the pilot and the first full §B5′ read: solo-saturation (a cheap
+  single-model reviewer caught ~90% of 20 deliberately-hardened, verified-real seeded bugs, whether or
+  not the buggy path had test coverage), the §B5′ metric re-rank (precision/noise/cost over recall),
+  and the two routing-loss mechanisms above — all descriptive, tiny n, no kill metric triggered.
+
 ## 0.1.12
 
 Capture relay hardening. A real-usage fusion-review run (large iOS/Android diff) failed before the panel
