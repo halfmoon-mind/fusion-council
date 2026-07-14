@@ -1,1 +1,5 @@
 .DS_Store
+# bench cases/results can embed private-repo code — never publish (repo is public)
+eval/cases/
+eval/results/
+eval/node_modules/
