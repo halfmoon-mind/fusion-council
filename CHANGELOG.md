@@ -1,5 +1,32 @@
 # Changelog
 
+## 0.2.0
+
+The review council's default panel is now the bench-validated **duo** — one generalist Claude seat +
+GPT-5.5, judged and synthesized exactly as before. The full Claude role panel stays one flag away
+(`args.roles: true`), and `fusion-plan` is unchanged.
+
+- **Change: `fusion-review` defaults to duo.** A post-0.1.13 re-run of the seeded-defect bench (9
+  settled cases × duo/full; pre-patch rows quarantined) measured duo at-or-above the role panel on the
+  §B5′ primary metrics: identical recall (easy 4/4, hard 1/1 — both arms now assert the one hard
+  case's defect as a High finding, confirming the 0.1.13 routing fixes repaired both measured loss
+  paths), clean-diff FP floor 2.0 vs ~3.5–4.75 findings/run, cost −21% ($1.85 vs $2.34/run), wall
+  −17%. Raw noise/SNR proxies differ by ≤0.2 findings/run in the role panel's favor — inside
+  demonstrated grader inconsistency (EVAL.md records both raw and hand-normalized counts). This is NOT
+  a role-panel deletion: no §D kill metric fired (the hard subset is n=1); it is a reversible default
+  with pre-registered reversion criteria in EVAL.md (acted-on-rate drop, two verified
+  role-panel-only misses, or a guarded bench extension reversing the order).
+- **Add: `args.roles` restores the role panel** (skeptic / test-strategist / maintainer + GPT-5.5).
+  `args.duo` is now a no-op (duo IS the default); `noGpt` composes with both (`roles` + `noGpt`
+  reproduces the historical nogpt bench arm). The telemetry `arm` field records the ACTUAL
+  configuration per run: `duo` (default), `full`, `nogpt`, `duo-nogpt`.
+- **Eval: `run_case.sh` arm mapping** — the full/nogpt arms opt back into the role panel via
+  `roles:true`; the duo arm keeps sending the legacy flag so the mapping stays valid against
+  pre-0.2.0 workflows.
+- **Docs: README / review skill / EVAL.md** — duo-default rationale; EVAL.md gains the §B5′
+  re-validation block and the pre-registered reversion guardrails (plus the `eval/ack.sh` acted-on
+  habit they depend on).
+
 ## 0.1.13
 
 Two classes of measured signal loss, found by the new seeded-defect bench (EVAL.md §B5′), plus the
