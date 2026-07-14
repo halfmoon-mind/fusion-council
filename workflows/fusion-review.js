@@ -1,9 +1,9 @@
 export const meta = {
   name: 'fusion-review',
   description:
-    'Deterministic read-only review council: Claude role panel (skeptic/test/maintainer) + GPT-5.5 review the working-tree diff, judged and synthesized into one findings report. Returns early if there is no diff. Appends run telemetry to ~/.fusion-council (disable: args.noTelemetry).',
+    'Deterministic read-only review council: one generalist Claude seat + GPT-5.5 review the working-tree diff, judged and synthesized into one findings report (duo default; args.roles restores the Claude role panel). Returns early if there is no diff. Appends run telemetry to ~/.fusion-council (disable: args.noTelemetry).',
   whenToUse:
-    'After implementing a non-trivial change, to vet the diff from multiple model families before merge. Takes no args — it reviews the current `git diff`.',
+    'After implementing a non-trivial change, to vet the diff from multiple model families before merge. It reviews the current `git diff`; no args required — optional: roles:true restores the Claude role panel, noGpt drops the GPT seat.',
   phases: [{ title: 'Capture' }, { title: 'Panel' }, { title: 'Judge' }, { title: 'Synthesize' }],
 }
 
@@ -19,12 +19,16 @@ if (typeof A === 'string' && A.trim().startsWith('{')) {
 const codexModel = (A && A.codexModel) || 'gpt-5.5'
 // 'high' = near-xhigh quality but ~1.6x faster on long tasks (measured A/B); pass codexEffort:'xhigh' for the hardest.
 const codexEffort = (A && A.codexEffort) || 'high'
-// Eval ablation arms (EVAL.md §B) — both default OFF, real usage unaffected. noGpt = council minus the
-// GPT seat (the GPT-marginal arm). duo = ONE generalist Claude seat + GPT + the same judge/synthesize:
-// the literature-pointed comparator the full role panel must beat (~half cost, same two mechanisms the
-// evidence actually supports — cross-family seat + grounded judge).
+// DEFAULT = DUO: one generalist Claude seat + GPT + the same judge/synthesize — the two mechanisms the
+// verified evidence supports (cross-family seat + grounded judge). Bench-measured post-v0.1.13 (EVAL.md
+// §B5′ re-validation): duo ties the role panel on recall (incl. the one hard case) and beats it on the
+// primary metrics — clean-diff FP floor ~2.0 vs 3.5/run and cost −21% — so the role panel is opt-in now.
+// args.roles restores it (fusion-plan still runs its role panel; agents/*.md serve both). args.duo is
+// legacy (it IS the default) and accepted as a no-op. noGpt = drop the GPT seat (the GPT-marginal arm;
+// with roles it reproduces the historical 'nogpt' bench arm). Reversion criteria live in EVAL.md.
 const noGpt = !!(A && A.noGpt)
-const duo = !!(A && A.duo)
+const roles = !!(A && A.roles)
+const duo = !roles
 // Disclosed side-effect gate: telemetry (EVAL.md §A) appends run stats to ~/.fusion-council — the ONE
 // write this otherwise read-only workflow performs. Pass noTelemetry:true for a strictly read-only run.
 const noTelemetry = !!(A && A.noTelemetry)
@@ -187,8 +191,9 @@ const PANEL = [
     label: r,
     run: () => agent(READ_ONLY + panelPrompt, { agentType: NS + r, phase: 'Panel', label: `panel:${r}` }),
   })),
-  // duo arm: one generalist Claude seat, pinned to opus for arm stability, given the same two-section
-  // dimension list the GPT seat gets (it has no role .md to supply coverage) so prompt strength is equal.
+  // duo (default): one generalist Claude seat, pinned to opus for arm stability, given the same
+  // two-section dimension list the GPT seat gets (no role .md supplies coverage) so prompt strength
+  // is equal across arms.
   ...(duo
     ? [
         {
@@ -303,7 +308,8 @@ try {
   const cap = (v) => (Array.isArray(v) ? v.map((s) => String(s).slice(0, 500)) : v)
   const row = JSON.stringify({
     workflow: 'fusion-review',
-    arm: duo ? 'duo' : noGpt ? 'nogpt' : 'full', // eval arm — joins bench runs to telemetry
+    // eval arm — joins bench runs to telemetry; records the ACTUAL configuration (default run = 'duo')
+    arm: roles ? (noGpt ? 'nogpt' : 'full') : noGpt ? 'duo-nogpt' : 'duo',
     panel: ran,
     gpt_ran: gptRan,
     gpt_retried: gptRetried,

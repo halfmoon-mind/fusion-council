@@ -1,6 +1,6 @@
 ---
 name: fusion-review
-description: Run the deterministic multi-model review council (Claude role panel + GPT-5.5) over the current working-tree diff after implementation.
+description: Run the deterministic multi-model review council (generalist Claude seat + GPT-5.5; args.roles restores the Claude role panel) over the current working-tree diff after implementation.
 disable-model-invocation: true
 ---
 
@@ -12,6 +12,9 @@ workflow `workflows/fusion-review.js`; it reviews the current `git diff`.
 1. Call the workflow by path (it takes no task — it reads the diff itself;
    `${CLAUDE_PLUGIN_ROOT}` resolves to this plugin's install directory):
    `Workflow({ scriptPath: "${CLAUDE_PLUGIN_ROOT}/workflows/fusion-review.js" })`
+   The default panel is the bench-validated duo (one generalist Claude seat +
+   GPT-5.5). Only if the user explicitly asks for the full role panel, pass
+   `args: { roles: true }` (skeptic · test-strategist · maintainer + GPT-5.5).
 2. When it returns, show the returned `review` to the user as-is, and surface `coverage`.
    If there is no diff, it returns early — relay that and stop. If the capture step itself fails
    (it yields neither a diff nor a clean `NO_DIFF` signal), the workflow throws instead of silently

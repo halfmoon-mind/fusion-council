@@ -8,8 +8,13 @@ more than one model family before you commit to it:
 - **`/fusion-council:fusion-plan <task>`** — before a non-trivial change. A Claude
   role panel (architect · skeptic · test-strategist · maintainer) plus **GPT-5.5**
   deliberate in parallel; a judge compares them on merit and one plan is synthesized.
-- **`/fusion-council:fusion-review`** — after the change. The same idea over your
-  current `git diff` (skeptic · test-strategist · maintainer + GPT-5.5) → one findings report.
+- **`/fusion-council:fusion-review`** — after the change. One generalist Claude seat
+  plus **GPT-5.5** review your current `git diff`, judged and synthesized → one
+  findings report. This duo is the bench-validated default (matched recall on the
+  settled case set — n=1 hard case, so recall deltas are anecdote — at ~half the
+  clean-diff noise and −21% cost; `EVAL.md` §B5′); pass
+  `args: { roles: true }` to restore the role panel (skeptic · test-strategist ·
+  maintainer + GPT-5.5).
 
 Both are **read-only**: panelists may read the repo but never edit it. Only you (the
 main session) implement, and only after you approve.
@@ -52,7 +57,8 @@ FP rate, cross-family agreement, and whether you actually acted on the output
 (`eval/ack.sh y|n`). `eval/analyze.sh` prints the scoreboard. This is the ONE
 write the otherwise read-only workflows perform — pass `noTelemetry: true` to
 disable it. The full validation methodology (verified literature, seeded-bug
-benchmark design, ablation arms `noGpt`/`duo`, kill metrics) lives in `EVAL.md`.
+benchmark design, ablation arms `noGpt`/`roles`, kill metrics, and the §B5′
+re-validation that made duo the review default) lives in `EVAL.md`.
 
 ## Layout
 
