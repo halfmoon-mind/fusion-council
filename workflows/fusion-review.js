@@ -204,7 +204,7 @@ const PANEL = [
                 panelPrompt +
                 `\n\nReport in TWO sections: (A) CORRECTNESS — regression risks, hidden coupling, ` +
                 `overengineering; (B) TESTS & SCOPE — missing tests and out-of-scope changes.`,
-              { model: 'opus', phase: 'Panel', label: 'panel:claude-generalist' }
+              { model: 'claude-opus-5', phase: 'Panel', label: 'panel:claude-generalist' }
             ),
         },
       ]
@@ -261,7 +261,7 @@ const judge = await agent(
     `snapshot). A finding about a line OUTSIDE the diff hunk is VALID only if it bears on behavior the diff ` +
     `CHANGES — an unrelated pre-existing issue is out-of-scope, so exclude it. Default-to-invalidClaims on ` +
     `uncertainty applies ONLY to concrete code claims — never to judgment calls or recommendations.`,
-  { schema: JUDGE_SCHEMA, model: 'opus', phase: 'Judge', label: 'judge' }
+  { schema: JUDGE_SCHEMA, model: 'claude-opus-5', phase: 'Judge', label: 'judge' }
 )
 
 // 3) Synthesize — one findings report. Keep real issues, drop invalidClaims.
@@ -293,7 +293,7 @@ const review = await agent(
     'only if genuinely none)\n' +
     `## Council Coverage  (${coverage})\n\n` +
     `If there are no actionable issues, say so clearly and list any residual test risk.`,
-  { model: 'opus', phase: 'Synthesize', label: 'synthesize' }
+  { model: 'claude-opus-5', phase: 'Synthesize', label: 'synthesize' }
 )
 
 // 4) Telemetry (observational eval, EVAL.md §A) — fail-open; must NEVER break or gate a run.

@@ -181,7 +181,7 @@ const PANEL = [
                 `\n\nGive TWO terse sections (a few bullets each, not prose): (A) RECOMMENDATION — ` +
                 `recommended approach and how to verify; (B) RISKS — key risks, simpler alternatives, ` +
                 `and what NOT to do.`,
-              { model: 'opus', phase: 'Panel', label: 'panel:claude-generalist' }
+              { model: 'claude-opus-5', phase: 'Panel', label: 'panel:claude-generalist' }
             ),
         },
       ]
@@ -235,7 +235,7 @@ const judge = await agent(
     `NEVER mark a forward-looking "should add/change X" recommendation ungroundable just because the target ` +
     `code does not exist yet. Default-to-invalidClaims on uncertainty applies ONLY to concrete claims about ` +
     `existing code — never to recommendations or judgment calls.`,
-  { schema: JUDGE_SCHEMA, model: 'opus', phase: 'Judge', label: 'judge' }
+  { schema: JUDGE_SCHEMA, model: 'claude-opus-5', phase: 'Judge', label: 'judge' }
 )
 
 // 3) Synthesize — one plan. Keep gold, drop invalidClaims, emit the fixed report. No implementation.
@@ -258,7 +258,7 @@ const plan = await agent(
     '## Cross-Model Notes (consensus / resolved contradictions / dropped claims + reason)\n' +
     '## Risks & Mitigations\n## Verification Criteria (command/test -> expected result)\n' +
     `## Do Not Do\n## Open Questions\n## Council Coverage  (${coverage})`,
-  { model: 'opus', phase: 'Synthesize', label: 'synthesize' }
+  { model: 'claude-opus-5', phase: 'Synthesize', label: 'synthesize' }
 )
 
 // 4) Telemetry (observational eval, EVAL.md §A) — fail-open; must NEVER break or gate a run.

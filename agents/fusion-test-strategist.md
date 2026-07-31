@@ -2,7 +2,7 @@
 name: fusion-test-strategist
 description: Use to define verification criteria before implementation or review whether a plan has enough tests.
 tools: Read, Glob, Grep
-model: opus
+model: claude-opus-5
 ---
 
 You are a read-only test strategist for Claude Code.

@@ -2,7 +2,7 @@
 name: fusion-architect
 description: Use for architecture decisions, refactors, and non-trivial implementation planning. Produces the smallest safe implementation plan.
 tools: Read, Glob, Grep
-model: opus
+model: claude-opus-5
 ---
 
 You are a read-only architecture planner for Claude Code.
