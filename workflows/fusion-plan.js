@@ -1,7 +1,7 @@
 export const meta = {
   name: 'fusion-plan',
   description:
-    'Deterministic read-only planning council: Claude role panel (architect/skeptic/test/maintainer) + GPT-5.5, judged and synthesized into one implementation plan. Every invocation runs the full pipeline — no skip gate. Appends run telemetry to ~/.fusion-council (disable: args.noTelemetry).',
+    'Deterministic read-only planning council: Claude role panel (architect/skeptic/test/maintainer) + GPT-5.6 Sol, judged and synthesized into one implementation plan. Every invocation runs the full pipeline — no skip gate. Appends run telemetry to ~/.fusion-council (disable: args.noTelemetry).',
   whenToUse:
     'Before a non-trivial change you choose to vet: architecture decisions, refactors, risky/multi-file edits, unclear bugs. Pass {task}. YOU decide when to run it; it always runs everything.',
   phases: [{ title: 'Context' }, { title: 'Panel' }, { title: 'Judge' }, { title: 'Synthesize' }],
@@ -22,14 +22,15 @@ if (!task || !String(task).trim()) {
   throw new Error('fusion-plan: missing args.task (pass the change you want planned)')
 }
 
-// GPT-5.5 = the ONLY non-Claude diversity axis, so it's a MANDATORY panel seat (always in PANEL below).
+// GPT-5.6 Sol = the ONLY non-Claude diversity axis, so it's a MANDATORY panel seat (always in PANEL below).
 // ONE seat (not N "role-lens" seats) with a two-section prompt (recommend + risks): splitting GPT into
 // multiple seats adds ZERO model-family diversity (same model), and two GPT answers agreeing would read as
 // "cross-model consensus" to the family-blind judge — shielding a shared GPT error from the single-source
 // merit drop. One honest single-source seat avoids that; depth comes from the two prompt sections instead.
-// ChatGPT sub only runs gpt-5.5 / gpt-5.4; 'high' = near-xhigh quality but ~1.6x faster on long tasks
-// (measured A/B, identical input), so it's the default; pass codexEffort:'xhigh' for the hardest, 'low' for raw speed.
-const codexModel = (A && A.codexModel) || 'gpt-5.5'
+// gpt-5.6-sol verified working on this ChatGPT sub at 'high' and 'xhigh' effort (2026-07); 'high' = near-xhigh
+// quality but ~1.6x faster on long tasks (A/B measured on gpt-5.5, not re-run on 5.6), so it's the default;
+// pass codexEffort:'xhigh' for the hardest, 'low' for raw speed.
+const codexModel = (A && A.codexModel) || 'gpt-5.6-sol'
 const codexEffort = (A && A.codexEffort) || 'high'
 const noContext = !!(A && A.noContext)
 // Eval ablation arm (EVAL.md §C) — default OFF, real usage unaffected. duo = ONE generalist Claude seat
@@ -65,7 +66,7 @@ const JUDGE_SCHEMA = {
   },
 }
 
-// GPT-5.5 via local Codex CLI (ChatGPT sub, no metered API). -s read-only = it cannot edit.
+// GPT-5.6 Sol via local Codex CLI (ChatGPT sub, no metered API). -s read-only = it cannot edit.
 // Input via QUOTED heredoc (<<'EOF') -> temp file -> fed to codex on STDIN (`- <"$PIN"`): the heredoc does
 // no interpolation, so $ / backticks / quotes in the task or context can't break the command (the old
 // inline "<prompt>" arg could). Reading the prompt from stdin instead of argv ALSO removes the ~1MB ARG_MAX
@@ -77,7 +78,7 @@ const JUDGE_SCHEMA = {
 const CODEX_FAIL = 'CODEX_UNAVAILABLE'
 const codexRun = (prompt) => () =>
   agent(
-    `You drive the local Codex CLI to get GPT-5.5's analysis of a planning task. Do TWO steps in order; ` +
+    `You drive the local Codex CLI to get GPT-5.6 Sol's analysis of a planning task. Do TWO steps in order; ` +
       `do NOT skip step 1.\n` +
       `STEP 1 — run this command verbatim BEFORE writing anything. It is read-only. Copy everything after ` +
       `"PROMPT:" below verbatim between the heredoc markers (a QUOTED heredoc, so the shell does NOT ` +
@@ -95,7 +96,7 @@ const codexRun = (prompt) => () =>
       `approach and how to verify; (B) RISKS — key risks, simpler alternatives, and what NOT to do.\n\n` +
       `PROMPT:\n${prompt}`,
     // sonnet, not the inherited Opus: this seat only shells out to codex and returns its output
-    // verbatim — GPT-5.5 does the reasoning. Same tier as the context:session Bash-runner below.
+    // verbatim — GPT-5.6 Sol does the reasoning. Same tier as the context:session Bash-runner below.
     { model: 'sonnet', phase: 'Panel', label: `panel:gpt-${codexModel}` }
   )
 
@@ -113,7 +114,7 @@ const withCodexRetry = (thunk) => async () => {
   gptRetried = true
   // `log` is a host-injected workflow global; guard with typeof so a runtime that lacks it can't throw a
   // ReferenceError on this exact failure path and defeat the retry. (typeof on an undeclared name is safe.)
-  if (typeof log === 'function') log('fusion-plan: GPT-5.5 seat returned CODEX_UNAVAILABLE — retrying once')
+  if (typeof log === 'function') log('fusion-plan: GPT-5.6 Sol seat returned CODEX_UNAVAILABLE — retrying once')
   return thunk()
 }
 
@@ -159,7 +160,7 @@ const panelPrompt =
   `claim with [UNVERIFIED]. This does NOT apply to forward-looking recommendations about code that does ` +
   `not exist yet.`
 
-// 1) Panel — 4 Claude role seats (agentType loads each .md's role prompt + read-only tools) + GPT-5.5.
+// 1) Panel — 4 Claude role seats (agentType loads each .md's role prompt + read-only tools) + GPT-5.6 Sol.
 //    All parallel; the judge needs them together, so a barrier here is correct.
 phase('Panel')
 const ROLES = duo ? [] : ['fusion-architect', 'fusion-skeptic', 'fusion-test-strategist', 'fusion-maintainer']
@@ -201,7 +202,7 @@ if (!answers.length) throw new Error('fusion-plan: no panelist produced output')
 const ran = answers.map((a) => a.panelist)
 const gptRan = ran.some((l) => l.startsWith('gpt-'))
 // GPT failure is recorded, never silently swallowed and never an interactive gate (deterministic).
-const coverage = `Seats: ${ran.join(', ')}. GPT-5.5: ${
+const coverage = `Seats: ${ran.join(', ')}. GPT-5.6 Sol: ${
   gptRan ? 'ran' : 'UNAVAILABLE — Claude-only this run, model diversity reduced'
 }.`
 

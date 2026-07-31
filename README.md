@@ -6,15 +6,15 @@ Two deterministic, read-only **councils** for Claude Code that vet your work wit
 more than one model family before you commit to it:
 
 - **`/fusion-council:fusion-plan <task>`** — before a non-trivial change. A Claude
-  role panel (architect · skeptic · test-strategist · maintainer) plus **GPT-5.5**
+  role panel (architect · skeptic · test-strategist · maintainer) plus **GPT-5.6 Sol**
   deliberate in parallel; a judge compares them on merit and one plan is synthesized.
 - **`/fusion-council:fusion-review`** — after the change. One generalist Claude seat
-  plus **GPT-5.5** review your current `git diff`, judged and synthesized → one
+  plus **GPT-5.6 Sol** review your current `git diff`, judged and synthesized → one
   findings report. This duo is the bench-validated default (matched recall on the
   settled case set — n=1 hard case, so recall deltas are anecdote — at ~half the
   clean-diff noise and −21% cost; `EVAL.md` §B5′); pass
   `args: { roles: true }` to restore the role panel (skeptic · test-strategist ·
-  maintainer + GPT-5.5).
+  maintainer + GPT-5.6 Sol).
 
 Both are **read-only**: panelists may read the repo but never edit it. Only you (the
 main session) implement, and only after you approve.
@@ -37,7 +37,7 @@ Local testing without GitHub: point the marketplace at this directory directly
 /fusion-council:fusion-review
 ```
 
-## The GPT-5.5 seat (optional)
+## The GPT-5.6 Sol seat (optional)
 
 The non-Claude panel seat shells out to the local **Codex CLI** (`codex exec`,
 ChatGPT subscription — no metered API). If `codex` isn't installed — or a run fails
