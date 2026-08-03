@@ -1,5 +1,19 @@
 # Changelog
 
+## 0.2.1
+
+Model bump on both council axes; no pipeline or default-panel changes.
+
+- **Change: GPT seat defaults to `gpt-5.6-sol`** (was `gpt-5.5`). Verified live on the ChatGPT-sub
+  Codex CLI (v0.145.0) at both `high` and `xhigh` reasoning effort — the old "sub only runs 5.5/5.4"
+  constraint no longer holds. The ~1.6x high-vs-xhigh speed A/B was measured on gpt-5.5 and has not
+  been re-run on 5.6 (flagged in-code). `args.codexModel: "gpt-5.5"` rolls back per run.
+- **Change: Claude seats pinned to `claude-opus-5`** (was the `opus` harness alias, resolving to
+  4.8). Applies to the judge/synthesize/generalist seats in both workflows and the 4 role-agent
+  frontmatters. Verified: a role agent boots and reports `claude-opus-5`. Sonnet-tier relay seats
+  (GPT wrapper, capture/context) are unchanged.
+- **Docs:** README / SKILL.md / plugin manifests now say GPT-5.6 Sol.
+
 ## 0.2.0
 
 The review council's default panel is now the bench-validated **duo** — one generalist Claude seat +
