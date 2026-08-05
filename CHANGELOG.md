@@ -1,5 +1,38 @@
 # Changelog
 
+## 0.3.0
+
+`fusion-review`'s judge and synthesizer are now **one merged opus call**: the seat that grounds and
+gates the panel's claims writes the final report from its own verdict in the same response
+(schema = the judge fields + `report`). Rationale: the synthesizer did no independent verification
+(it was forbidden to re-litigate merit calls), and both measured post-judge information losses —
+the `correctedFindings` sink (0.1.13) and the assertion demotion — were judge→synthesizer HANDOFF
+bugs; merging removes that seam class outright and saves the pipeline's second-largest input pass.
+`fusion-plan` keeps the two-call pipeline (unvalidated there).
+
+- **Change: merged judge+synthesize is the review default.** Bench 2026-08-05 with same-era duo
+  re-runs (opus-5 + gpt-5.6-sol both arms; the July §B5′ duo rows are gpt-5.5/opus-4.8-era and not
+  comparable): recall tie — 5/5 seeded bugs including the one solo-prescreened hard case (n=1 =
+  anecdote, per the §B5′ rule); clean-case noise (unaudited audit-pile counts) lower on all three
+  runnable cleans (3/8/5 vs 4/11/7 — the feared same-call `invalidClaims` softening did not appear,
+  it pointed the other way); cost −7%, wall −7% on the same-era pairs. Reversible default with
+  pre-registered reversion criteria in EVAL.md §B0 (hand-audit of the audit piles is still owed;
+  intra-call demotion is watchable by diffing telemetry `judge` vs the report).
+- **Add: `args.splitSynth` restores the two-call pipeline.** `args.mergedSynth` is now a legacy
+  no-op (merged IS the default). Judge/report instruction text is shared verbatim between both
+  paths, so the flag flips architecture only. Telemetry `arm` gains a `-merged` suffix recording
+  the ACTUAL configuration (`duo-merged` is the new default arm string). Known, disclosed confound:
+  the merged report travels as a schema string field, the split one as free text (EVAL.md §B0).
+- **Guard: typed merged-return check** — a missing/empty/non-string `report` throws instead of
+  shipping `review: undefined` (and a raw-string return can't be rest-spread into a fake `judge`).
+- **Eval: `duo-merged` bench arm** (`eval/run_case.sh`, all telemetry/gpt/relay guards) and
+  `eval/smoke_review.mjs`, an offline stub-runner asserting both pipeline branches' call shapes —
+  the cheap check the bench lacked (a branch typo used to surface only mid-bench at ~$2/attempt).
+  The historical full/nogpt/duo arms now pin `splitSynth:true` (no-op pre-0.3.0).
+- **Bench incidents (recorded in EVAL.md §B0):** case 020's source repo vanished from disk
+  (excluded_d1 — repair or retire); duo-merged case-018 attempt 1 died pre-telemetry twice
+  (arm-assert caught both, attempt 2 clean) — undiagnosed, watching the retry base rate.
+
 ## 0.2.1
 
 Model bump on both council axes; no pipeline or default-panel changes.

@@ -1,9 +1,9 @@
 export const meta = {
   name: 'fusion-review',
   description:
-    'Deterministic read-only review council: one generalist Claude seat + GPT-5.6 Sol review the working-tree diff, judged and synthesized into one findings report (duo default; args.roles restores the Claude role panel). Returns early if there is no diff. Appends run telemetry to ~/.fusion-council (disable: args.noTelemetry).',
+    'Deterministic read-only review council: one generalist Claude seat + GPT-5.6 Sol review the working-tree diff, then one merged judge+synthesize call grounds the findings and writes one report (duo default; args.roles restores the Claude role panel, args.splitSynth the two-call judge→synthesize pipeline). Returns early if there is no diff. Appends run telemetry to ~/.fusion-council (disable: args.noTelemetry).',
   whenToUse:
-    'After implementing a non-trivial change, to vet the diff from multiple model families before merge. It reviews the current `git diff`; no args required — optional: roles:true restores the Claude role panel, noGpt drops the GPT seat.',
+    'After implementing a non-trivial change, to vet the diff from multiple model families before merge. It reviews the current `git diff`; no args required — optional: roles:true restores the Claude role panel, noGpt drops the GPT seat, splitSynth:true the two-call judge→synthesize pipeline.',
   phases: [{ title: 'Capture' }, { title: 'Panel' }, { title: 'Judge' }, { title: 'Synthesize' }],
 }
 
@@ -29,6 +29,16 @@ const codexEffort = (A && A.codexEffort) || 'high'
 const noGpt = !!(A && A.noGpt)
 const roles = !!(A && A.roles)
 const duo = !roles
+// DEFAULT = MERGED (since 0.3.0): judge + synthesize collapsed into ONE opus call that returns the
+// judge fields AND the final report together. Synthesize did no independent verification (it may not
+// re-litigate merit calls), and both measured post-judge information losses — the correctedFindings
+// sink and the assertion-demotion — were judge→synthesize HANDOFF bugs; one call removes the seam and
+// saves the pipeline's second-largest input pass. Bench 2026-08-05 (EVAL.md §B0, same-era duo pairs):
+// recall tie (5/5 bug cases incl. the hard one), clean-case noise lower on all three cleans, cost −7% —
+// the feared same-call invalidClaims softening did not appear. args.splitSynth restores the two-call
+// pipeline (the historical full/nogpt/duo bench arms send it); args.mergedSynth is legacy (it IS the
+// default), accepted as a no-op. Pre-registered reversion criteria live in EVAL.md §B0.
+const mergedSynth = !(A && A.splitSynth)
 // Disclosed side-effect gate: telemetry (EVAL.md §A) appends run stats to ~/.fusion-council — the ONE
 // write this otherwise read-only workflow performs. Pass noTelemetry:true for a strictly read-only run.
 const noTelemetry = !!(A && A.noTelemetry)
@@ -65,6 +75,14 @@ const JUDGE_SCHEMA = {
     // is an information sink (measured: bench 2026-07-14, a real seeded bug lost exactly this way).
     correctedFindings: { type: 'array', items: { type: 'string' } },
   },
+}
+
+// mergedSynth: identical judge fields + the report from the same call — telemetry keeps the exact judge
+// shape, and a finding can't be lost in a handoff the arm no longer makes.
+const MERGED_SCHEMA = {
+  ...JUDGE_SCHEMA,
+  required: [...JUDGE_SCHEMA.required, 'report'],
+  properties: { ...JUDGE_SCHEMA.properties, report: { type: 'string' } },
 }
 
 // A2 (option b): the capture seat writes its diff snapshot to a temp file and returns the path; the GPT
@@ -235,66 +253,97 @@ const coverage = `Seats: ${ran.join(', ')}. GPT-5.6 Sol: ${
 // single-source drop leniency systematically tilts against the council's only cross-family seat and
 // gives a shared Opus misreading multi-source cover. Corroboration = both families, nothing less.
 phase('Judge')
-const judge = await agent(
-  READ_ONLY +
-    `${panelPrompt}\n\nReviewer findings (JSON):\n${JSON.stringify(answers, null, 2)}\n\n` +
-    `Compare on merit — no panelist is privileged. Extract: consensus (prefix findings BOTH model families ` +
-    `independently raised with [cross-family]); contradictions; uniqueInsights ` +
-    `(real issues only ONE caught — prefix with the panelist); coverageGaps; blindSpots; and ` +
-    `invalidClaims (any finding, INCLUDING GPT's, that is wrong, out of scope, or unsupported by the ` +
-    `diff — format "panelist: finding — why"); and correctedFindings (JUDGE-AUTHORED: whenever an ` +
-    `invalidClaims entry refutes an EXCULPATORY claim — "this change is fine/safe/consistent" — assert the ` +
-    `corrected concrete finding your refutation implies, format "file:line — issue — why", so that knowledge ` +
-    `survives the invalidClaims exclusion; [] when no refutation implies one).\n\n` +
-    `GROUNDING: for every finding that cites a path:line or describes specific code, confirm it against the ` +
-    `diff above; use your read-only tools to open the cited file ONLY if it is not in the diff. Ground on ` +
-    `whether the citation EXISTS and CONCERNS that code — tolerate paraphrase, do NOT require a verbatim ` +
-    `quote. Put in invalidClaims (format "panelist: finding — ungroundable") any CONCRETE code claim you ` +
-    `cannot tie to real code, and be willing to drop a weakly-grounded SINGLE-SOURCE finding this way; ` +
-    `NEVER drop a finding BOTH model families raised without checking it against the diff first. ` +
-    `CORROBORATION IS CROSS-FAMILY ONLY: the Claude role seats share one base model behind different ` +
-    `lenses, so Claude-only agreement is correlated sampling, NOT independent confirmation — hold a ` +
-    `Claude-majority finding to the SAME grounding bar as a single-source one, and never count Claude-seat ` +
-    `agreement as evidence against the GPT seat's single-raised finding (GPT sees only the diff, so judge ` +
-    `its findings against the diff, not against repo files it could not read). Prefer the embedded diff as ground ` +
-    `truth; treat any on-disk file read as supplementary (the working tree may differ from the diff ` +
-    `snapshot). A finding about a line OUTSIDE the diff hunk is VALID only if it bears on behavior the diff ` +
-    `CHANGES — an unrelated pre-existing issue is out-of-scope, so exclude it. Default-to-invalidClaims on ` +
-    `uncertainty applies ONLY to concrete code claims — never to judgment calls or recommendations.`,
-  { schema: JUDGE_SCHEMA, model: 'claude-opus-5', phase: 'Judge', label: 'judge' }
-)
+// Instruction text shared VERBATIM by the split pipeline and the mergedSynth arm, so the bench compares
+// architecture (one call vs two), not prompt drift.
+const JUDGE_TASK =
+  `Compare on merit — no panelist is privileged. Extract: consensus (prefix findings BOTH model families ` +
+  `independently raised with [cross-family]); contradictions; uniqueInsights ` +
+  `(real issues only ONE caught — prefix with the panelist); coverageGaps; blindSpots; and ` +
+  `invalidClaims (any finding, INCLUDING GPT's, that is wrong, out of scope, or unsupported by the ` +
+  `diff — format "panelist: finding — why"); and correctedFindings (JUDGE-AUTHORED: whenever an ` +
+  `invalidClaims entry refutes an EXCULPATORY claim — "this change is fine/safe/consistent" — assert the ` +
+  `corrected concrete finding your refutation implies, format "file:line — issue — why", so that knowledge ` +
+  `survives the invalidClaims exclusion; [] when no refutation implies one).\n\n` +
+  `GROUNDING: for every finding that cites a path:line or describes specific code, confirm it against the ` +
+  `diff above; use your read-only tools to open the cited file ONLY if it is not in the diff. Ground on ` +
+  `whether the citation EXISTS and CONCERNS that code — tolerate paraphrase, do NOT require a verbatim ` +
+  `quote. Put in invalidClaims (format "panelist: finding — ungroundable") any CONCRETE code claim you ` +
+  `cannot tie to real code, and be willing to drop a weakly-grounded SINGLE-SOURCE finding this way; ` +
+  `NEVER drop a finding BOTH model families raised without checking it against the diff first. ` +
+  `CORROBORATION IS CROSS-FAMILY ONLY: the Claude role seats share one base model behind different ` +
+  `lenses, so Claude-only agreement is correlated sampling, NOT independent confirmation — hold a ` +
+  `Claude-majority finding to the SAME grounding bar as a single-source one, and never count Claude-seat ` +
+  `agreement as evidence against the GPT seat's single-raised finding (GPT sees only the diff, so judge ` +
+  `its findings against the diff, not against repo files it could not read). Prefer the embedded diff as ground ` +
+  `truth; treat any on-disk file read as supplementary (the working tree may differ from the diff ` +
+  `snapshot). A finding about a line OUTSIDE the diff hunk is VALID only if it bears on behavior the diff ` +
+  `CHANGES — an unrelated pre-existing issue is out-of-scope, so exclude it. Default-to-invalidClaims on ` +
+  `uncertainty applies ONLY to concrete code claims — never to judgment calls or recommendations.`
+const REPORT_TASK =
+  `Write ONE review report. Keep consensus, preserve every uniqueInsight that survived invalidClaims (do ` +
+  `NOT drop a finding merely for being single-source, and do NOT re-litigate the judge's merit calls; you ` +
+  `MAY silently drop only an item that directly contradicts the diff or would break the output contract), ` +
+  `include every correctedFindings item under "## Findings" (Raised by: judge), ` +
+  `route coverageGaps/blindSpots — plus any unstated assumptions or unspecified requirements the diff ` +
+  `leaves open — into the "## Open Questions" section as QUESTIONS (that section ASKS; it must not assert ` +
+  `a finding you cannot ground, so it never adds false positives). NEVER DEMOTE AN ASSERTION: a consensus/` +
+  `uniqueInsights/correctedFindings item that asserts a CONCRETE defect (cites code and a mechanism) MUST ` +
+  `appear under "## Findings" as an assertion — do not rephrase it into a question or file it under Test ` +
+  `Gaps/Open Questions (measured failure mode: a real panel-raised bug demoted to Open Questions and lost). ` +
+  `Open Questions is ONLY for genuinely interrogative items. Silently EXCLUDE everything in ` +
+  `invalidClaims (do NOT add a dropped-claims section; keep the exact output structure below). Only ` +
+  `actionable findings. Do not edit files.\n\n` +
+  `Output EXACTLY this structure:\n` +
+  '# Fusion Review\n## Findings  (each: Severity / File / Issue / Suggested fix / Raised by)\n' +
+  '## Cross-Model Agreement  (findings multiple families independently flagged)\n' +
+  '## Test Gaps\n## Scope Check  (stayed within request? unrelated changes?)\n' +
+  '## Recommended Next Action\n' +
+  '## Open Questions  (unstated assumptions / unspecified requirements / dimensions not covered — tie ' +
+  'each to a path:line where possible; phrase as questions, assert nothing ungrounded; omit the section ' +
+  'only if genuinely none)\n' +
+  `## Council Coverage  (${coverage})\n\n` +
+  `If there are no actionable issues, say so clearly and list any residual test risk.`
 
-// 3) Synthesize — one findings report. Keep real issues, drop invalidClaims.
-phase('Synthesize')
-const review = await agent(
-  READ_ONLY +
-    `${panelPrompt}\n\nReviewer findings (JSON):\n${JSON.stringify(answers)}\n\n` +
-    `Judge (JSON):\n${JSON.stringify(judge)}\n\nCouncil coverage: ${coverage}\n\n` +
-    `Write ONE review report. Keep consensus, preserve every uniqueInsight that survived invalidClaims (do ` +
-    `NOT drop a finding merely for being single-source, and do NOT re-litigate the judge's merit calls; you ` +
-    `MAY silently drop only an item that directly contradicts the diff or would break the output contract), ` +
-    `include every correctedFindings item under "## Findings" (Raised by: judge), ` +
-    `route coverageGaps/blindSpots — plus any unstated assumptions or unspecified requirements the diff ` +
-    `leaves open — into the "## Open Questions" section as QUESTIONS (that section ASKS; it must not assert ` +
-    `a finding you cannot ground, so it never adds false positives). NEVER DEMOTE AN ASSERTION: a consensus/` +
-    `uniqueInsights/correctedFindings item that asserts a CONCRETE defect (cites code and a mechanism) MUST ` +
-    `appear under "## Findings" as an assertion — do not rephrase it into a question or file it under Test ` +
-    `Gaps/Open Questions (measured failure mode: a real panel-raised bug demoted to Open Questions and lost). ` +
-    `Open Questions is ONLY for genuinely interrogative items. Silently EXCLUDE everything in ` +
-    `invalidClaims (do NOT add a dropped-claims section; keep the exact output structure below). Only ` +
-    `actionable findings. Do not edit files.\n\n` +
-    `Output EXACTLY this structure:\n` +
-    '# Fusion Review\n## Findings  (each: Severity / File / Issue / Suggested fix / Raised by)\n' +
-    '## Cross-Model Agreement  (findings multiple families independently flagged)\n' +
-    '## Test Gaps\n## Scope Check  (stayed within request? unrelated changes?)\n' +
-    '## Recommended Next Action\n' +
-    '## Open Questions  (unstated assumptions / unspecified requirements / dimensions not covered — tie ' +
-    'each to a path:line where possible; phrase as questions, assert nothing ungrounded; omit the section ' +
-    'only if genuinely none)\n' +
-    `## Council Coverage  (${coverage})\n\n` +
-    `If there are no actionable issues, say so clearly and list any residual test risk.`,
-  { model: 'claude-opus-5', phase: 'Synthesize', label: 'synthesize' }
-)
+let judge, review
+if (mergedSynth) {
+  // One call adjudicates AND writes: the report is filled from the model's own judge fields, so the two
+  // measured losses (correctedFindings sink, assertion demotion) can no longer happen AS HANDOFF bugs.
+  // Intra-call omission remains possible — that residual is exactly what the bench arm measures.
+  const merged = await agent(
+    READ_ONLY +
+      `${panelPrompt}\n\nReviewer findings (JSON):\n${JSON.stringify(answers, null, 2)}\n\n` +
+      `Council coverage: ${coverage}\n\n` +
+      `FIRST fill the judge fields. ${JUDGE_TASK}\n\n` +
+      `THEN fill \`report\` in this SAME response, applying your own judge fields above exactly as a ` +
+      `downstream synthesizer would: ${REPORT_TASK}`,
+    { schema: MERGED_SCHEMA, model: 'claude-opus-5', phase: 'Judge', label: 'judge+synthesize' }
+  )
+  // Typed, not truthy: this runtime boundary already produced a string-where-object-expected bug once
+  // (the JSON-string args normalization above), and a rest-spread over a raw string would ship character
+  // indices to telemetry as the "judge" while review lands undefined.
+  if (!merged || typeof merged.report !== 'string' || !merged.report.trim())
+    throw new Error('fusion-review: merged judge+synthesize seat produced no usable report')
+  const { report, ...rest } = merged
+  judge = rest
+  review = report
+} else {
+  judge = await agent(
+    READ_ONLY +
+      `${panelPrompt}\n\nReviewer findings (JSON):\n${JSON.stringify(answers, null, 2)}\n\n` +
+      JUDGE_TASK,
+    { schema: JUDGE_SCHEMA, model: 'claude-opus-5', phase: 'Judge', label: 'judge' }
+  )
+
+  // 3) Synthesize — one findings report. Keep real issues, drop invalidClaims.
+  phase('Synthesize')
+  review = await agent(
+    READ_ONLY +
+      `${panelPrompt}\n\nReviewer findings (JSON):\n${JSON.stringify(answers)}\n\n` +
+      `Judge (JSON):\n${JSON.stringify(judge)}\n\nCouncil coverage: ${coverage}\n\n` +
+      REPORT_TASK,
+    { model: 'claude-opus-5', phase: 'Synthesize', label: 'synthesize' }
+  )
+}
 
 // 4) Telemetry (observational eval, EVAL.md §A) — fail-open; must NEVER break or gate a run.
 // Same pattern as fusion-plan (see the fuller comment there): no fs/process/Date/timers in this runtime,
@@ -309,7 +358,7 @@ try {
   const row = JSON.stringify({
     workflow: 'fusion-review',
     // eval arm — joins bench runs to telemetry; records the ACTUAL configuration (default run = 'duo')
-    arm: roles ? (noGpt ? 'nogpt' : 'full') : noGpt ? 'duo-nogpt' : 'duo',
+    arm: (roles ? (noGpt ? 'nogpt' : 'full') : noGpt ? 'duo-nogpt' : 'duo') + (mergedSynth ? '-merged' : ''),
     panel: ran,
     gpt_ran: gptRan,
     gpt_retried: gptRetried,
@@ -344,7 +393,8 @@ try {
         `echo TELEMETRY_BAD; fi\n` +
         `  rmdir "$D/.lock" 2>/dev/null; rm -f "$F"\n` +
         `Return ONLY the command's final output line.`,
-      { model: 'sonnet', phase: 'Synthesize', label: 'telemetry' }
+      // mergedSynth never enters the Synthesize phase, so group telemetry under Judge there
+      { model: 'sonnet', phase: mergedSynth ? 'Judge' : 'Synthesize', label: 'telemetry' }
     )
   let ack = await send()
   if (!/TELEMETRY_OK/.test(String(ack))) ack = await send()

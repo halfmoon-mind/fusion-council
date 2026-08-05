@@ -14,7 +14,13 @@ more than one model family before you commit to it:
   settled case set — n=1 hard case, so recall deltas are anecdote — at ~half the
   clean-diff noise and −21% cost; `EVAL.md` §B5′); pass
   `args: { roles: true }` to restore the role panel (skeptic · test-strategist ·
-  maintainer + GPT-5.6 Sol).
+  maintainer + GPT-5.6 Sol). Since v0.3.0 the judge and the report writer are **one
+  call**: the same seat that grounds and gates the panel's claims writes the final
+  report from its own verdict, which removes the judge→synthesizer handoff both
+  measured information-loss bugs lived in. A same-era bench pass tied recall (5/5
+  bug cases incl. the hard one), lowered clean-diff noise on every clean case, and
+  cost −7% (`EVAL.md` §B0); `args: { splitSynth: true }` restores the two-call
+  pipeline.
 
 Both are **read-only**: panelists may read the repo but never edit it. Only you (the
 main session) implement, and only after you approve.

@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# usage: eval/run_case.sh <case-id> <full|nogpt|duo|solo|solo-k>
+# usage: eval/run_case.sh <case-id> <full|nogpt|duo|duo-merged|solo|solo-k>
 # Runs ONE case x ONE arm (EVAL.md §B3, hardened per §3): scratch clone with SCRUBBED git history,
 # seeded working-tree diff, arm-specific review, wall-clock + cost + gpt_ran recorded.
 # Appends one row to eval/results/bench.jsonl. Review text is recovered via file Write (not stdout
@@ -46,10 +46,15 @@ while :; do
   W=$(build_scratch)
   T0=$(date +%s)
   case $ARM in
-    full|nogpt|duo)
-      # duo is the workflow default since 0.2.0; full/nogpt opt back into the role panel via roles:true.
-      # duo still sends the legacy no-op flag so this mapping stays valid against pre-0.2.0 workflows.
-      ARGS='{"roles":true}'; [ "$ARM" = nogpt ] && ARGS='{"roles":true,"noGpt":true}'; [ "$ARM" = duo ] && ARGS='{"duo":true}'
+    full|nogpt|duo|duo-merged)
+      # duo panel is the default since 0.2.0 (roles:true opts back into the role panel); merged
+      # judge+synthesize is the default since 0.3.0. The historical full/nogpt/duo arms are TWO-CALL
+      # pipeline arms, so they pin splitSynth:true (no-op against pre-0.3.0 workflows, which are split
+      # by default); duo-merged keeps mergedSynth:true (no-op post-0.3.0, opts in pre-0.3.0). duo:true
+      # is the pre-0.2.0-compat legacy flag, kept so duo vs duo-merged differ by exactly one axis.
+      ARGS='{"roles":true,"splitSynth":true}'; [ "$ARM" = nogpt ] && ARGS='{"roles":true,"noGpt":true,"splitSynth":true}'
+      [ "$ARM" = duo ] && ARGS='{"duo":true,"splitSynth":true}'
+      [ "$ARM" = duo-merged ] && ARGS='{"duo":true,"mergedSynth":true}'
       RV="$W/.fusion-bench-review.md"
       PROMPT="Call the Workflow tool EXACTLY ONCE with {\"scriptPath\":\"$WF\",\"args\":$ARGS}. Do not review the code yourself. Then use the Write tool to save the returned 'review' field EXACTLY, in full, to $RV . Reply with only the single word DONE."
       ENV=$(run_claude "$W" "$PROMPT" "")
@@ -90,14 +95,14 @@ $REVS" sonnet)
   # (a) the workflow actually ran the REQUESTED arm (catches args silently dropped/stringified — this
   # exact failure corrupted the first pilot: every nogpt/duo run silently executed as full), and
   # (b) for full/duo, that the GPT seat really ran. Violation → rerun (≤3 attempts), else excluded.
-  if [ "$ARM" = full ] || [ "$ARM" = duo ] || [ "$ARM" = nogpt ]; then
+  if [ "$ARM" = full ] || [ "$ARM" = duo ] || [ "$ARM" = duo-merged ] || [ "$ARM" = nogpt ]; then
     ROW=$(jq -c --arg w "$W" 'select(.cwd == $w or .cwd == ("/private" + $w))' "$TEL" 2>/dev/null | tail -1)
     gpt_ran=$(printf '%s' "$ROW" | jq -r '.gpt_ran // false')
     run_id=$(printf '%s' "$ROW" | jq -r '.run_id // null')
     tel_arm=$(printf '%s' "$ROW" | jq -r '.arm // "none"')
     bad=""
     [ "$tel_arm" != "$ARM" ] && bad="telemetry arm=$tel_arm != requested $ARM"
-    if [ -z "$bad" ] && { [ "$ARM" = full ] || [ "$ARM" = duo ]; } && [ "$gpt_ran" != true ]; then
+    if [ -z "$bad" ] && { [ "$ARM" = full ] || [ "$ARM" = duo ] || [ "$ARM" = duo-merged ]; } && [ "$gpt_ran" != true ]; then
       bad="gpt_ran=$gpt_ran"
     fi
     if [ -n "$bad" ] && [ $attempt -lt 3 ]; then
@@ -109,7 +114,7 @@ $REVS" sonnet)
   fi
 
   # relay guard: council review must have real content; one extra attempt total (shared with gpt guard)
-  if { [ "$ARM" = full ] || [ "$ARM" = nogpt ] || [ "$ARM" = duo ]; } && [ "${#REVIEW}" -lt 200 ] && [ $attempt -lt 3 ]; then
+  if { [ "$ARM" = full ] || [ "$ARM" = nogpt ] || [ "$ARM" = duo ] || [ "$ARM" = duo-merged ]; } && [ "${#REVIEW}" -lt 200 ] && [ $attempt -lt 3 ]; then
     echo "case $CASE arm $ARM attempt $attempt: review too short (${#REVIEW}) — retrying" >&2
     rm -rf "$W"; continue
   fi

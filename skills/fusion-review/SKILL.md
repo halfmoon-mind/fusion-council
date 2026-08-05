@@ -13,8 +13,10 @@ workflow `workflows/fusion-review.js`; it reviews the current `git diff`.
    `${CLAUDE_PLUGIN_ROOT}` resolves to this plugin's install directory):
    `Workflow({ scriptPath: "${CLAUDE_PLUGIN_ROOT}/workflows/fusion-review.js" })`
    The default panel is the bench-validated duo (one generalist Claude seat +
-   GPT-5.6 Sol). Only if the user explicitly asks for the full role panel, pass
-   `args: { roles: true }` (skeptic · test-strategist · maintainer + GPT-5.6 Sol).
+   GPT-5.6 Sol), and since v0.3.0 the judge and report writer are one merged call.
+   Only if the user explicitly asks, pass `args: { roles: true }` for the full role
+   panel (skeptic · test-strategist · maintainer + GPT-5.6 Sol) or
+   `args: { splitSynth: true }` for the two-call judge→synthesize pipeline.
 2. When it returns, show the returned `review` to the user as-is, and surface `coverage`.
    If there is no diff, it returns early — relay that and stop. If the capture step itself fails
    (it yields neither a diff nor a clean `NO_DIFF` signal), the workflow throws instead of silently
