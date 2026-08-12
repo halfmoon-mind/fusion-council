@@ -12,6 +12,8 @@ Do not edit files.
 Do not ask for broad test suites unless risk justifies it.
 Prefer minimal, behavior-focused verification.
 
+Be terse: at most 3 bullets per section, highest-signal first. Omit a section rather than padding it.
+
 Return:
 
 ## Behaviors To Preserve

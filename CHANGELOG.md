@@ -1,5 +1,39 @@
 # Changelog
 
+## 0.4.0
+
+`fusion-plan` adopts the merged judge+synthesize call `fusion-review` has run since 0.3.0, and the
+four Claude role agents get a per-section brevity cap. Both changes attack the same thing — the
+volume of low-signal claims the judge has to adjudicate. Motivating telemetry (181 real runs,
+`~/.fusion-council`): the plan council's role seats emit 28–40 bullet-claims per run each (~143/run
+total) while the GPT seat produces the SAME unique-insight yield as the architect seat (68 vs 68)
+from a third of the claims (312 vs 860); plan `invalidClaims` runs 5.5/run against merged review's
+1.48/run.
+
+- **Change: merged judge+synthesize is the plan default.** Same structure as 0.3.0's review change
+  (schema = the judge fields + `plan`), same rationale: the synthesizer was forbidden to re-litigate
+  merit calls, and the `correctedFindings` sink was a judge→synthesizer HANDOFF bug. **Ported on the
+  review arm's bench, NOT benched on plan** — §C plan A/B still has never run. Reversible; criteria
+  below and in EVAL.md §B0. `args: { splitSynth: true }` restores the two-call pipeline;
+  `args: { mergedSynth: true }` is a no-op, symmetric with review. Judge/plan instruction text is
+  shared verbatim between both paths, so the flag flips architecture only. Telemetry `arm` gains the
+  `-merged` suffix (`full-merged` is the new default arm string).
+- **Change: brevity cap on all four role agents** — "at most 3 bullets per section, highest-signal
+  first; omit a section rather than padding it." Caps a 5–6 section seat at ~15 claims, near the GPT
+  seat's measured density. Rationale is the Goodhart guard from EVAL.md §3: an uncapped seat gets a
+  free `uniqueInsights` lottery ticket per extra claim with no observable penalty, and ~82% of plan
+  claims are discarded by the judge today.
+- **Guard: typed merged-return check** — a missing/empty/non-string `plan` throws instead of shipping
+  `plan: undefined` (and a raw-string return can't be rest-spread into a fake `judge`).
+- **Eval: `eval/smoke_plan.mjs`**, the offline stub-runner for the plan workflow (both branches,
+  string-args normalization, missing-`task` throw). Mirrors `smoke_review.mjs`; no subagents, no cost.
+- **Measurement debt, disclosed (EVAL.md §B0):** (a) the role `.md`s are SHARED with
+  `fusion-review`'s `args.roles` arm, so the cap invalidates the historical `full`/`nogpt` bench rows
+  as comparators — they are prompt-era-stale, not re-run; (b) both changes land in the same telemetry
+  window, so a post-change improvement cannot be attributed to one or the other; (c) telemetry is
+  judge-circular (§3 MAJOR) and remains descriptive-only — it motivated this change, it cannot
+  validate it.
+
 ## 0.3.0
 
 `fusion-review`'s judge and synthesizer are now **one merged opus call**: the seat that grounds and

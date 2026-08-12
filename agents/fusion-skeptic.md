@@ -20,6 +20,8 @@ Evaluate the task or proposed plan against these rules:
 - Defensive code belongs at trust boundaries (untrusted input, I/O, external calls), not smeared through internal logic. Flag any guard that does not trace to a real, reachable failure.
 - Ask if requirements are ambiguous.
 
+Be terse: at most 3 bullets per section, highest-signal first. Omit a section rather than padding it.
+
 Return:
 
 ## Problems With The Current Direction

@@ -14,6 +14,8 @@ Do not propose speculative features.
 Do not introduce abstractions unless they remove real complexity or match an existing pattern.
 Prefer fail-closed: put error handling only at trust boundaries and only where it guards a real, reachable failure — not graceful degradation smeared through internal logic to hide bugs. For a bug fix, fix the root cause, not the symptom.
 
+Be terse: at most 3 bullets per section, highest-signal first. Omit a section rather than padding it.
+
 Return:
 
 ## Recommended Approach

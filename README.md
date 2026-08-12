@@ -7,7 +7,11 @@ more than one model family before you commit to it:
 
 - **`/fusion-council:fusion-plan <task>`** — before a non-trivial change. A Claude
   role panel (architect · skeptic · test-strategist · maintainer) plus **GPT-5.6 Sol**
-  deliberate in parallel; a judge compares them on merit and one plan is synthesized.
+  deliberate in parallel; one merged judge+synthesize call compares them on merit and
+  writes the plan from its own verdict. Since v0.4.0 this is the same one-call shape
+  `fusion-review` has run since v0.3.0, ported on that arm's bench result — the plan
+  council itself is unbenched (`EVAL.md` §B0); `args: { splitSynth: true }` restores
+  the two-call pipeline.
 - **`/fusion-council:fusion-review`** — after the change. One generalist Claude seat
   plus **GPT-5.6 Sol** review your current `git diff`, judged and synthesized → one
   findings report. This duo is the bench-validated default (matched recall on the

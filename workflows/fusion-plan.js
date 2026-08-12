@@ -1,9 +1,9 @@
 export const meta = {
   name: 'fusion-plan',
   description:
-    'Deterministic read-only planning council: Claude role panel (architect/skeptic/test/maintainer) + GPT-5.6 Sol, judged and synthesized into one implementation plan. Every invocation runs the full pipeline — no skip gate. Appends run telemetry to ~/.fusion-council (disable: args.noTelemetry).',
+    'Deterministic read-only planning council: Claude role panel (architect/skeptic/test/maintainer) + GPT-5.6 Sol, then one merged judge+synthesize call grounds the analyses and writes one implementation plan (args.splitSynth restores the two-call judge→synthesize pipeline). Every invocation runs the full pipeline — no skip gate. Appends run telemetry to ~/.fusion-council (disable: args.noTelemetry).',
   whenToUse:
-    'Before a non-trivial change you choose to vet: architecture decisions, refactors, risky/multi-file edits, unclear bugs. Pass {task}. YOU decide when to run it; it always runs everything.',
+    'Before a non-trivial change you choose to vet: architecture decisions, refactors, risky/multi-file edits, unclear bugs. Pass {task}. YOU decide when to run it; it always runs everything — optional: splitSynth:true restores the two-call judge→synthesize pipeline.',
   phases: [{ title: 'Context' }, { title: 'Panel' }, { title: 'Judge' }, { title: 'Synthesize' }],
 }
 
@@ -36,6 +36,13 @@ const noContext = !!(A && A.noContext)
 // Eval ablation arm (EVAL.md §C) — default OFF, real usage unaffected. duo = ONE generalist Claude seat
 // + GPT + the same judge/synthesize: the literature-pointed comparator the full role panel must beat.
 const duo = !!(A && A.duo)
+// Merged judge+synthesize (default, ported from fusion-review v0.3.0). Synthesis never had licence to
+// re-litigate merit calls, and the measured post-judge information loss — the correctedFindings sink —
+// was a judge→synthesize HANDOFF bug; one call removes the seam and saves the pipeline's second-largest
+// input pass. Review-side bench (EVAL.md §B0) showed recall tie, lower clean-case noise, cost −7%, and
+// no same-call invalidClaims softening; plan telemetry motivating the port: invalidClaims 5.5/run here
+// vs 1.48/run on merged review. args.splitSynth restores the two-call pipeline (bench arms send it).
+const mergedSynth = !(A && A.splitSynth)
 // Disclosed side-effect gate: telemetry (EVAL.md §A) appends run stats to ~/.fusion-council — the ONE
 // write this otherwise read-only workflow performs. Pass noTelemetry:true for a strictly read-only run.
 const noTelemetry = !!(A && A.noTelemetry)
@@ -64,6 +71,14 @@ const JUDGE_SCHEMA = {
     // (measured in the review council's bench, 2026-07-14; same gate structure here).
     correctedFindings: { type: 'array', items: { type: 'string' } },
   },
+}
+
+// mergedSynth: identical judge fields + the plan from the same call — telemetry keeps the exact judge
+// fields either way, so the arms stay comparable on everything but the seam.
+const MERGED_SCHEMA = {
+  ...JUDGE_SCHEMA,
+  required: [...JUDGE_SCHEMA.required, 'plan'],
+  properties: { ...JUDGE_SCHEMA.properties, plan: { type: 'string' } },
 }
 
 // GPT-5.6 Sol via local Codex CLI (ChatGPT sub, no metered API). -s read-only = it cannot edit.
@@ -213,9 +228,9 @@ const coverage = `Seats: ${ran.join(', ')}. GPT-5.6 Sol: ${
 // single-source drop leniency systematically tilts against the council's only cross-family seat and
 // gives a shared Opus misreading multi-source cover. Corroboration = both families, nothing less.
 phase('Judge')
-const judge = await agent(
-  READ_ONLY +
-    `${panelPrompt}\n\nPanel analyses (JSON):\n${JSON.stringify(answers, null, 2)}\n\n` +
+// Instruction text shared VERBATIM by the split pipeline and the mergedSynth arm, so the bench compares
+// architecture (one call vs two), not prompt drift.
+const JUDGE_TASK =
     `Compare on merit — no panelist is privileged. Extract: consensus (prefix items BOTH model families ` +
     `independently raised with [cross-family]); contradictions; uniqueInsights ` +
     `(valuable points only ONE raised — prefix with the panelist); coverageGaps; blindSpots; and ` +
@@ -235,16 +250,8 @@ const judge = await agent(
     `single-raised claim. CRITICAL: this is a pre-implementation plan — ` +
     `NEVER mark a forward-looking "should add/change X" recommendation ungroundable just because the target ` +
     `code does not exist yet. Default-to-invalidClaims on uncertainty applies ONLY to concrete claims about ` +
-    `existing code — never to recommendations or judgment calls.`,
-  { schema: JUDGE_SCHEMA, model: 'claude-opus-5', phase: 'Judge', label: 'judge' }
-)
-
-// 3) Synthesize — one plan. Keep gold, drop invalidClaims, emit the fixed report. No implementation.
-phase('Synthesize')
-const plan = await agent(
-  READ_ONLY +
-    `${panelPrompt}\n\nPanel analyses (JSON):\n${JSON.stringify(answers)}\n\n` +
-    `Judge (JSON):\n${JSON.stringify(judge)}\n\nCouncil coverage: ${coverage}\n\n` +
+    `existing code — never to recommendations or judgment calls.`
+const PLAN_TASK =
     `Write ONE implementation plan. Keep consensus, resolve contradictions, preserve every uniqueInsight ` +
     `that survived invalidClaims (do NOT drop a surviving point merely for being single-source, and do NOT ` +
     `re-litigate the judge's merit calls; you MAY drop only an item that directly contradicts the repo/` +
@@ -258,9 +265,47 @@ const plan = await agent(
     '## Recommended Plan  (each step -> verify: check)\n' +
     '## Cross-Model Notes (consensus / resolved contradictions / dropped claims + reason)\n' +
     '## Risks & Mitigations\n## Verification Criteria (command/test -> expected result)\n' +
-    `## Do Not Do\n## Open Questions\n## Council Coverage  (${coverage})`,
-  { model: 'claude-opus-5', phase: 'Synthesize', label: 'synthesize' }
-)
+    `## Do Not Do\n## Open Questions\n## Council Coverage  (${coverage})`
+
+let judge, plan
+if (mergedSynth) {
+  // One call adjudicates AND writes: the plan is filled from the model's own judge fields, so the
+  // measured correctedFindings sink can no longer happen AS A HANDOFF bug. Intra-call omission remains
+  // possible — that residual is exactly what the bench arm measures.
+  const merged = await agent(
+    READ_ONLY +
+      `${panelPrompt}\n\nPanel analyses (JSON):\n${JSON.stringify(answers, null, 2)}\n\n` +
+      `Council coverage: ${coverage}\n\n` +
+      `FIRST fill the judge fields. ${JUDGE_TASK}\n\n` +
+      `THEN fill \`plan\` in this SAME response, applying your own judge fields above exactly as a ` +
+      `downstream synthesizer would: ${PLAN_TASK}`,
+    { schema: MERGED_SCHEMA, model: 'claude-opus-5', phase: 'Judge', label: 'judge+synthesize' }
+  )
+  // Typed, not truthy: a rest-spread over a raw string would ship character indices to telemetry as the
+  // "judge" while plan lands undefined (same boundary bug class as the JSON-string args above).
+  if (!merged || typeof merged.plan !== 'string' || !merged.plan.trim())
+    throw new Error('fusion-plan: merged judge+synthesize seat produced no usable plan')
+  const { plan: planText, ...rest } = merged
+  judge = rest
+  plan = planText
+} else {
+  judge = await agent(
+    READ_ONLY +
+      `${panelPrompt}\n\nPanel analyses (JSON):\n${JSON.stringify(answers, null, 2)}\n\n` +
+      JUDGE_TASK,
+    { schema: JUDGE_SCHEMA, model: 'claude-opus-5', phase: 'Judge', label: 'judge' }
+  )
+
+  // 3) Synthesize — one plan. Keep gold, drop invalidClaims, emit the fixed report. No implementation.
+  phase('Synthesize')
+  plan = await agent(
+    READ_ONLY +
+      `${panelPrompt}\n\nPanel analyses (JSON):\n${JSON.stringify(answers)}\n\n` +
+      `Judge (JSON):\n${JSON.stringify(judge)}\n\nCouncil coverage: ${coverage}\n\n` +
+      PLAN_TASK,
+    { model: 'claude-opus-5', phase: 'Synthesize', label: 'synthesize' }
+  )
+}
 
 // 4) Telemetry (observational eval, EVAL.md §A) — fail-open; must NEVER break or gate a run.
 // The runtime has no fs/process/Date/timers, so ONE seat appends the row via a QUOTED heredoc; the
@@ -280,7 +325,7 @@ try {
   const cap = (v) => (Array.isArray(v) ? v.map((s) => String(s).slice(0, 500)) : v)
   const row = JSON.stringify({
     workflow: 'fusion-plan',
-    arm: duo ? 'duo' : 'full', // eval arm — joins bench runs to telemetry
+    arm: (duo ? 'duo' : 'full') + (mergedSynth ? '-merged' : ''), // eval arm — joins bench runs to telemetry
     panel: ran,
     gpt_ran: gptRan,
     gpt_retried: gptRetried,
@@ -314,7 +359,8 @@ try {
         `echo TELEMETRY_BAD; fi\n` +
         `  rmdir "$D/.lock" 2>/dev/null; rm -f "$F"\n` +
         `Return ONLY the command's final output line.`,
-      { model: 'sonnet', phase: 'Synthesize', label: 'telemetry' }
+      // mergedSynth never enters the Synthesize phase, so group telemetry under Judge there
+      { model: 'sonnet', phase: mergedSynth ? 'Judge' : 'Synthesize', label: 'telemetry' }
     )
   let ack = await send()
   if (!/TELEMETRY_OK/.test(String(ack))) ack = await send()

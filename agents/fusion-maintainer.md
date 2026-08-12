@@ -12,6 +12,8 @@ Do not edit files.
 Do not suggest broad cleanup.
 Focus only on the user's requested change.
 
+Be terse: at most 3 bullets per section, highest-signal first. Omit a section rather than padding it.
+
 Return:
 
 ## Fit With Existing Codebase

@@ -401,6 +401,29 @@ floor to full outside the gray zone. **Habit:** after each real fusion-review, a
 `eval/ack.sh y|n` — the acted-on rate is the only non-circular online signal and is criterion (a)'s
 denominator.
 
+**PLAN MERGE + ROLE BREVITY CAP (v0.4.0, 2026-08-12) — UNBENCHED, telemetry-motivated.** Two changes
+shipped together on the observational scoreboard (181 runs, `eval/analyze.sh`), NOT on a bench: (1)
+`fusion-plan` adopts the merged judge+synthesize call, ported on §B0's review-arm bench — §C plan A/B
+STILL has never run, so there is no plan-side causal evidence; (2) the four role `.md`s get a
+3-bullets-per-section cap. Motivating numbers: plan role seats emit 28–40 claims/run each (~143/run,
+~82% discarded by the judge) while the GPT seat yields the same 68 uniqueInsights as the architect
+seat from 312 claims vs 860; plan `invalidClaims` 5.5/run vs merged review's 1.48/run. Per §3 MAJOR
+this telemetry is judge-circular and CANNOT validate the change — it only motivated it.
+**Three disclosed measurement defects, recorded rather than hidden:** (a) **CONFOUNDED WINDOW** — the
+two changes share one telemetry window, so any post-change delta is unattributable between them
+(separating them costs a `splitSynth:true` run series; judged not worth it since both push the same
+direction); (b) **HISTORICAL ARMS INVALIDATED** — the role `.md`s are shared with `fusion-review`'s
+`args.roles` arm, so §B5′'s `full`/`nogpt` rows are now prompt-era-stale as comparators, the same
+quarantine class as `results/*.stale-pre0113-duofull.jsonl` but NOT re-run (full is comparator-only
+since the v0.2.0 duo default); (c) tuning and evaluating in the same window is exactly what §3 MAJOR
+pre-registered against — accepted knowingly here because the alternative was leaving a measured 82%
+claim-discard rate in place indefinitely. **Reversion criteria (pre-registered):** restore the
+two-call plan pipeline and/or drop the cap if EITHER (a) plan `invalidClaims`/run fails to fall below
+~4.0 over ≥10 post-change `full-merged` runs, or (b) plan `uniqueInsights`/run drops below ~8 (from
+11.87) — recall loss from over-trimmed seats, the cap's specific risk, or (c) TWO real-usage misses
+are attributed to a capped seat (a point a `splitSynth:true` or pre-cap re-run of the same task
+raises that the default run omits — journal-verified, not vibes).
+
 ## 3) Methodology attack — flaws in the harness above and required fixes
 
 *A hostile methodology review of section 2. Apply these fixes before trusting any kill metric.*
