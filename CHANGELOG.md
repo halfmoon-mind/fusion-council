@@ -1,5 +1,34 @@
 # Changelog
 
+## 0.5.0
+
+The telemetry seat is gone; the workflow journal is the telemetry. Motivating measurement (2026-09-21,
+334 journals + 188 telemetry rows): the harness already journals every run with the full return value,
+wall time, total tokens, per-seat model/tokens and killed/failed status — a strict superset of the
+`telemetry.jsonl` row — while the sonnet append seat cost a median 33k tokens and ~40s per review run
+(the relay seats were also all running on Opus, see below).
+
+- **Remove: telemetry append seat** in both workflows, and `eval/ack.sh` (1 ack in 188 runs). The
+  workflows now perform zero writes. `args.noTelemetry` is accepted as a no-op. Run stats that only the
+  script knows — `arm`, `gpt_ran`, `gpt_retried`, `capture_retried`, `codexModel/Effort`, per-seat
+  `{chars, claims}`, `subject_head` — return as `stats` and land in the journal with everything else.
+- **Change: `eval/analyze.sh` reads the journals** (`~/.claude/projects/*/*/workflows/wf_*.json`), adds
+  wall/token medians per arm and per-seat token medians with the model that actually ran, and excludes
+  scratch-repo bench runs unless `--bench`. Pre-0.5.0 runs are covered too: arm and gpt_ran derive from
+  the panel + agent labels. `eval/journal.sh` (new) resolves a run by cwd or runId for
+  `run_case.sh`/`grade_case.sh`, which no longer read `telemetry.jsonl`. The old kill-match metric
+  (`unique_killed`, 1 hit in 992 insights — judge lists are disjoint by construction) is dropped.
+- **Fix: claim counter** — the Goodhart denominator only counted `- `/`1.` lines, so a generalist seat
+  writing `**A1.**` items scored `claims: 0` in 20 of 59 duo-merged runs (its 0.73 surviving-per-claim
+  was inflated). Bold-numbered and `###` item lines now count. Smoke tests assert it.
+- **Docs: workflows are registered by name.** Real sessions launch `Workflow({ name:
+  "fusion-council:fusion-review" })` with the workflow `meta` as the skill text; README no longer claims
+  the `scriptPath` route is the only one.
+- **Field notes (not code):** the installed copy was still 0.3.0 — 0.4.0 never ran in real usage, and no
+  council run is recorded after 2026-08-12. A global `CLAUDE_CODE_SUBAGENT_MODEL=opus` had overridden
+  every `model: 'haiku' | 'sonnet'` relay-seat pin since July (journals: capture/gpt-wrapper/telemetry
+  seats all on Opus; ~31% of a review run's tokens). Removed from the user's settings on 2026-09-21.
+
 ## 0.4.0
 
 `fusion-plan` adopts the merged judge+synthesize call `fusion-review` has run since 0.3.0, and the

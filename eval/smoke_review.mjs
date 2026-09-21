@@ -22,7 +22,7 @@ async function run(args) {
     if (opts.label === 'capture:diff')
       return '===FUSION_DIFF_PATH===/tmp/fake-diff\n M a.js\n---DIFF---\ndiff --git a/a.js b/a.js\n+x'
     if (opts.label && opts.label.startsWith('panel:gpt-')) return 'gpt finding: a.js:1 — x'
-    if (opts.label === 'panel:claude-generalist') return 'claude finding: a.js:1 — x'
+    if (opts.label === 'panel:claude-generalist') return '**A1.** a.js:1 — x\n- y\n### B1 z\nprose line'
     if (opts.schema) {
       const out = {}
       for (const k of opts.schema.required) out[k] = k === 'report' ? '# Fusion Review (merged stub)' : []
@@ -42,15 +42,18 @@ const expectMerged = async (args, tag) => {
   assert(labels.includes('judge+synthesize'), `${tag}: judge+synthesize seat ran`)
   assert(!labels.includes('judge') && !labels.includes('synthesize'), `${tag}: split seats did not run`)
   assert.equal(result.review, '# Fusion Review (merged stub)', `${tag}: review comes from the report field`)
-  assert(!('report' in result.judge), `${tag}: report stripped from the judge object (telemetry shape)`)
+  assert(!('report' in result.judge), `${tag}: report stripped from the judge object (journal shape)`)
+  assert.equal(result.stats.arm, 'duo-merged', `${tag}: stats.arm records the actual configuration`)
+  assert.equal(result.stats.seats.find((s) => s.panelist === 'claude-generalist').claims, 3, `${tag}: claims counts bullet, **A1.** and ### lines`)
 }
-await expectMerged({ noTelemetry: true }, 'default')                      // merged IS the default (0.3.0)
-await expectMerged({ mergedSynth: true, noTelemetry: true }, 'legacy')    // legacy flag accepted as no-op
+await expectMerged({}, 'default')                      // merged IS the default (0.3.0)
+await expectMerged({ mergedSynth: true }, 'legacy')    // legacy flag accepted as no-op
 {
-  const { calls, result } = await run({ splitSynth: true, noTelemetry: true })
+  const { calls, result } = await run({ splitSynth: true })
   const labels = calls.map((c) => c.label)
   assert(labels.includes('judge') && labels.includes('synthesize'), 'split: both seats ran')
   assert(!labels.includes('judge+synthesize'), 'split: merged seat did not run')
   assert.equal(result.review, '# Fusion Review (split stub)', 'split: review comes from the synthesize seat')
+  assert.equal(result.stats.arm, 'duo', 'split: stats.arm has no -merged suffix')
 }
 console.log('smoke_review OK')

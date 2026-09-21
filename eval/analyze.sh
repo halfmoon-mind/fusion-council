@@ -1,77 +1,69 @@
 #!/usr/bin/env bash
-# usage: eval/analyze.sh [telemetry.jsonl]
-# Per-seat scoreboard from real fusion-plan/fusion-review usage (EVAL.md §A).
+# usage: eval/analyze.sh [--bench] [wf_*.json ...]
+# Scoreboard from the workflow journals the harness writes for every run
+# (~/.claude/projects/*/*/workflows/wf_*.json): result.{judge,panel,stats}, status, durationMs, totalTokens,
+# per-seat model/tokens. Replaces the telemetry.jsonl append seat (0.5.0). Bench runs (scratch repos under
+# $TMPDIR) are excluded unless --bench. Runs older than 0.5.0 have no result.stats: arm/gpt_ran are derived
+# from the panel + agent labels, claim counts are simply absent.
 # DESCRIPTIVE only: the judge is the scorer (circular) — never a kill-metric input on its own.
 set -euo pipefail
-IN="${1:-$HOME/.fusion-council/telemetry.jsonl}"
-[ -f "$IN" ] || { echo "no telemetry at $IN" >&2; exit 1; }
+BENCH=false; [ "${1:-}" = --bench ] && { BENCH=true; shift; }
+if [ $# -gt 0 ]; then FILES=("$@"); else FILES=("$HOME"/.claude/projects/*/*/workflows/wf_*.json); fi
+[ -e "${FILES[0]}" ] || { echo "no workflow journals found" >&2; exit 1; }
 
-# fromjson? // empty: a row the sonnet seat mangled (and jq -e somehow let through) is skipped, not fatal.
-jq -cR 'fromjson? // empty' "$IN" | jq -s '
+jq -c 'select(.workflowName == "fusion-review" or .workflowName == "fusion-plan") | . + {file: input_filename}' "${FILES[@]}" \
+| jq -s --argjson bench "$BENCH" '
   def seat: (ascii_downcase | split(":")[0]) as $p |
-    if   ($p | test("gpt|codex|5\\.5")) then "gpt"
-    elif ($p | test("architect"))       then "architect"
-    elif ($p | test("skeptic"))         then "skeptic"
-    elif ($p | test("test"))            then "test-strategist"
-    elif ($p | test("maintain"))        then "maintainer"
-    elif ($p | test("generalist"))      then "generalist"
+    if   ($p | test("gpt|codex"))  then "gpt"
+    elif ($p | test("architect"))  then "architect"
+    elif ($p | test("skeptic"))    then "skeptic"
+    elif ($p | test("test"))       then "test-strategist"
+    elif ($p | test("maintain"))   then "maintainer"
+    elif ($p | test("generalist")) then "generalist"
     else "other" end;
-  # Kill-match: an insight is "killed" if any invalidClaims entry of the same run CONTAINS the
-  # normalized 40-char key of the insight (invalidClaims = "panelist: claim — why", so containment
-  # beats equality). Judge semantics keep the two lists disjoint by construction, and paraphrased
-  # kills will NOT match — this UNDER-detects killed insights; treat surviving_* as an upper bound.
-  def norm: ascii_downcase | gsub("[^a-z0-9]";"") | .[0:40];
-  def normfull: ascii_downcase | gsub("[^a-z0-9]";"");
-  def pct2: . * 100 | round / 100;
+  def median: sort | if length == 0 then null elif length % 2 == 1 then .[(length-1)/2] else (.[length/2-1] + .[length/2]) / 2 end;
+  def pct2: if . == null then null else (. * 100 | round) / 100 end;
+  def agents: [(.workflowProgress // [])[] | select(.type == "workflow_agent")];
+  def seatlabel: .label | sub(" \\(retry \\d+\\)$"; "") | sub("^panel:gpt-.*$"; "panel:gpt");
+  def panel: .result.panel // [];
+  def arm: .result.stats.arm //
+    ((if (panel | any(startswith("fusion-"))) then (if (panel | any(startswith("gpt-"))) then "full" else "nogpt" end)
+      else (if (panel | any(startswith("gpt-"))) then "duo" else "duo-nogpt" end) end)
+     + (if (agents | any(.label == "judge+synthesize")) then "-merged" else "" end));
+  def gpt_ran: .result.stats.gpt_ran // (panel | any(startswith("gpt-")));
 
-  . as $all
-  | ($all | map(select(.judge))) as $runs
-  | ($all | map(select(.ack))) as $acks
+  map(select($bench or (.file | test("/-private-var-folders-.*-T-tmp") | not))) as $all
+  | ($all | map(select(.status == "completed" and .result.judge))) as $done
   | {
-      runs: ($runs | length),
-      dropped_rows: ($all | map(select(.dropped)) | length),
-      by_workflow: ($runs | group_by(.workflow) | map({(.[0].workflow): length}) | add // {}),
-      by_arm: ($runs | group_by(.arm // "full") | map({(.[0].arm // "full"): length}) | add // {}),
-      gpt_ran_runs: ($runs | map(select(.gpt_ran)) | length),
-      gpt_retried_runs: ($runs | map(select(.gpt_retried)) | length),
-      # error-decorrelation in practice: judge tags consensus BOTH families raised with [cross-family]
-      consensus: { total: ($runs | map(.judge.consensus // [] | length) | add // 0),
-                   cross_family: ($runs
-                     | map([(.judge.consensus // [])[] | select(startswith("[cross-family]"))] | length)
-                     | add // 0) },
-      acted_on: { acked: ($acks | length),
-                  yes: ($acks | map(select(.acted_on == "y")) | length),
-                  no:  ($acks | map(select(.acted_on == "n")) | length) },
+      runs: ($all | length),
+      by_arm: ($all | group_by([.workflowName, arm]) | map({
+        workflow: .[0].workflowName, arm: (.[0] | arm), runs: length,
+        status: (group_by(.status) | map({(.[0].status): length}) | add),
+        gpt_ran: ([.[] | select(gpt_ran)] | length),
+        wall_min_med:  ([.[] | select(.status == "completed") | .durationMs / 60000] | median | pct2),
+        tokens_k_med:  ([.[] | select(.status == "completed") | .totalTokens / 1000] | median | pct2) })),
+      # error-decorrelation in practice: the judge tags consensus BOTH families raised with [cross-family]
+      consensus: { total: ($done | map(.result.judge.consensus // [] | length) | add // 0),
+                   cross_family: ($done | map([(.result.judge.consensus // [])[] | select(startswith("[cross-family]"))] | length) | add // 0) },
+      # per-seat tokens: shows what each seat really costs (and which model actually ran it)
+      seat_tokens: ([$done[] | agents[] | select(.tokens) | {l: seatlabel, t: (.tokens | tonumber), m: .model}]
+        | group_by(.l) | map({ label: .[0].l, n: length, tokens_k_med: ([.[].t / 1000] | median | pct2),
+                               models: (group_by(.m) | map({(.[0].m // "?"): length}) | add) })
+        | sort_by(-.tokens_k_med)),
       per_seat: (
-        [ $runs[] as $r
-          | ($r.run_id // $r.ts) as $rid
-          | ($r.judge.invalidClaims // [] | map(normfull)) as $inv
-          | ( (($r.panel // [])[] | { s: seat, kind: "ran", n: 1, run: $rid }),
-              (($r.seats // [])[] | { s: (.panelist | seat), kind: "claim", n: (.claims // 0), run: $rid }),
-              (($r.judge.uniqueInsights // [])[]
-                | { s: seat,
-                    kind: (if (norm as $k | $inv | any(contains($k))) then "unique_killed" else "unique_surviving" end),
-                    n: 1, run: $rid }),
-              (($r.judge.invalidClaims // [])[] | { s: seat, kind: "invalid", n: 1, run: $rid }) )
-        ]
+        [ $done[] | (panel[] | { s: seat, kind: "ran", n: 1 }),
+                    ((.result.stats.seats // [])[] | { s: (.panelist | seat), kind: "claim", n: (.claims // 0) }),
+                    ((.result.judge.uniqueInsights // [])[] | { s: seat, kind: "unique", n: 1 }),
+                    ((.result.judge.invalidClaims // [])[] | { s: seat, kind: "invalid", n: 1 }) ]
         | group_by(.s)
-        | map(
-            . as $g
-            | { seat: $g[0].s,
-                runs_ran:         ([$g[] | select(.kind == "ran")] | length),
-                claims_total:     ([$g[] | select(.kind == "claim") | .n] | add // 0),
-                surviving_unique: ([$g[] | select(.kind == "unique_surviving")] | length),
-                unique_killed:    ([$g[] | select(.kind == "unique_killed")] | length),
-                invalid_total:    ([$g[] | select(.kind == "invalid")] | length),
-                decisive_runs:    ([$g[] | select(.kind == "unique_surviving") | .run] | unique | length) }
-            | . + {
-                surviving_per_run:   (if .runs_ran > 0 then (.surviving_unique / .runs_ran | pct2) else null end),
-                decisive_run_rate:   (if .runs_ran > 0 then (.decisive_runs / .runs_ran | pct2) else null end),
-                surviving_per_claim: (if .claims_total > 0 then (.surviving_unique / .claims_total | pct2) else null end),
-                fp_rate: (if (.invalid_total + .surviving_unique) > 0
-                          then (.invalid_total / (.invalid_total + .surviving_unique) | pct2) else null end) }
-          )
-        | sort_by(-.surviving_unique)
-      )
+        | map({ seat: .[0].s,
+                runs_ran:     ([.[] | select(.kind == "ran")] | length),
+                claims_total: ([.[] | select(.kind == "claim") | .n] | add // 0),
+                unique:       ([.[] | select(.kind == "unique")] | length),
+                invalid:      ([.[] | select(.kind == "invalid")] | length) }
+          | . + { unique_per_run:   (if .runs_ran > 0 then (.unique / .runs_ran | pct2) else null end),
+                  unique_per_claim: (if .claims_total > 0 then (.unique / .claims_total | pct2) else null end),
+                  fp_rate: (if (.invalid + .unique) > 0 then (.invalid / (.invalid + .unique) | pct2) else null end) })
+        | sort_by(-.unique))
     }
 '

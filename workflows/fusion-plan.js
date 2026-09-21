@@ -1,7 +1,7 @@
 export const meta = {
   name: 'fusion-plan',
   description:
-    'Deterministic read-only planning council: Claude role panel (architect/skeptic/test/maintainer) + GPT-5.6 Sol, then one merged judge+synthesize call grounds the analyses and writes one implementation plan (args.splitSynth restores the two-call judge→synthesize pipeline). Every invocation runs the full pipeline — no skip gate. Appends run telemetry to ~/.fusion-council (disable: args.noTelemetry).',
+    'Deterministic read-only planning council: Claude role panel (architect/skeptic/test/maintainer) + GPT-5.6 Sol, then one merged judge+synthesize call grounds the analyses and writes one implementation plan (args.splitSynth restores the two-call judge→synthesize pipeline). Every invocation runs the full pipeline — no skip gate. Run stats (arm, seats, claim counts) travel in the returned `stats`, so the workflow journal is the telemetry.',
   whenToUse:
     'Before a non-trivial change you choose to vet: architecture decisions, refactors, risky/multi-file edits, unclear bugs. Pass {task}. YOU decide when to run it; it always runs everything — optional: splitSynth:true restores the two-call judge→synthesize pipeline.',
   phases: [{ title: 'Context' }, { title: 'Panel' }, { title: 'Judge' }, { title: 'Synthesize' }],
@@ -43,9 +43,6 @@ const duo = !!(A && A.duo)
 // no same-call invalidClaims softening; plan telemetry motivating the port: invalidClaims 5.5/run here
 // vs 1.48/run on merged review. args.splitSynth restores the two-call pipeline (bench arms send it).
 const mergedSynth = !(A && A.splitSynth)
-// Disclosed side-effect gate: telemetry (EVAL.md §A) appends run stats to ~/.fusion-council — the ONE
-// write this otherwise read-only workflow performs. Pass noTelemetry:true for a strictly read-only run.
-const noTelemetry = !!(A && A.noTelemetry)
 
 // Read-only guard — belt-and-suspenders on top of each agent's own tool restriction. This is an
 // ANALYSIS workflow; nothing may mutate the repo. (Symmetric with codex's -s read-only below.)
@@ -307,67 +304,16 @@ if (mergedSynth) {
   )
 }
 
-// 4) Telemetry (observational eval, EVAL.md §A) — fail-open; must NEVER break or gate a run.
-// The runtime has no fs/process/Date/timers, so ONE seat appends the row via a QUOTED heredoc; the
-// SHELL supplies ts/cwd/run_id. `jq -e` validates the row BEFORE append — that guards WELL-FORMEDNESS,
-// not fidelity (a copy that stays valid JSON but alters a value is not detectable here; the workflow
-// journal keeps ground truth). A copy that fails validation appends a tiny fixed {dropped:true} stub
-// instead, so the large-run drop bias stays measurable. Appends take a bounded mkdir lock (≤5s, then
-// best-effort) because bench arms run councils in parallel and a judge-sized line exceeds the atomic-
-// append boundary. Row is compact (judge entries capped at 500 chars, per-seat counts, NOT full
-// answers — the journal keeps those). Single-line JSON means a literal FUSION_TELEMETRY_EOF inside the
-// data can't terminate the heredoc (needs its own line). One retry on a missing TELEMETRY_OK (the seat
-// can spuriously bail like the codex wrapper; a retry after a BAD may leave stub+row — visible, benign).
-// No hard timeout is possible here (no timers) — a hung seat is bounded by the harness agent lifecycle.
-// DESCRIPTIVE data only (the judge is the scorer — circular); never a kill-metric input on its own.
-if (!noTelemetry)
-try {
-  const cap = (v) => (Array.isArray(v) ? v.map((s) => String(s).slice(0, 500)) : v)
-  const row = JSON.stringify({
-    workflow: 'fusion-plan',
-    arm: (duo ? 'duo' : 'full') + (mergedSynth ? '-merged' : ''), // eval arm — joins bench runs to telemetry
-    panel: ran,
-    gpt_ran: gptRan,
-    gpt_retried: gptRetried,
-    codexModel,
-    codexEffort,
-    judge: Object.fromEntries(Object.entries(judge).map(([k, v]) => [k, cap(v)])),
-    coverage,
-    seats: answers.map((a) => ({
-      panelist: a.panelist,
-      chars: String(a.analysis).length,
-      // bullet/numbered lines ≈ claim count: the survival-per-claim denominator (Goodhart guard)
-      claims: String(a.analysis)
-        .split('\n')
-        .filter((l) => /^\s*([-*•]|\d+[.)])\s/.test(l)).length,
-    })),
-    subject_head: String(task).slice(0, 200),
-  })
-  const send = () =>
-    agent(
-      `Append one telemetry row. Run this command verbatim. The heredoc body is ONE single line of JSON — ` +
-        `copy it EXACTLY, character-for-character, no reformatting:\n` +
-        `  F=$(mktemp); cat > "$F" <<'FUSION_TELEMETRY_EOF'\n` +
-        `${row}\n` +
-        `FUSION_TELEMETRY_EOF\n` +
-        `  D="$HOME/.fusion-council"; mkdir -p "$D"; RID="$(date -u +%s)-$$-$RANDOM"\n` +
-        `  for i in $(seq 1 50); do mkdir "$D/.lock" 2>/dev/null && break; sleep 0.1; done\n` +
-        `  if jq -e . "$F" >/dev/null 2>&1; then jq -c --arg ts "$(date -u +%FT%TZ)" --arg cwd "$PWD" ` +
-        `--arg rid "$RID" '. + {ts:$ts,cwd:$cwd,run_id:$rid}' "$F" >> "$D/telemetry.jsonl" && echo TELEMETRY_OK; ` +
-        `else jq -cn --arg ts "$(date -u +%FT%TZ)" --arg cwd "$PWD" --arg rid "$RID" ` +
-        `'{dropped:true,workflow:"fusion-plan",ts:$ts,cwd:$cwd,run_id:$rid}' >> "$D/telemetry.jsonl"; ` +
-        `echo TELEMETRY_BAD; fi\n` +
-        `  rmdir "$D/.lock" 2>/dev/null; rm -f "$F"\n` +
-        `Return ONLY the command's final output line.`,
-      // mergedSynth never enters the Synthesize phase, so group telemetry under Judge there
-      { model: 'sonnet', phase: mergedSynth ? 'Judge' : 'Synthesize', label: 'telemetry' }
-    )
-  let ack = await send()
-  if (!/TELEMETRY_OK/.test(String(ack))) ack = await send()
-  if (!/TELEMETRY_OK/.test(String(ack)) && typeof log === 'function')
-    log('fusion-plan: telemetry row dropped (seat did not confirm a valid append)')
-} catch (e) {
-  if (typeof log === 'function') log('fusion-plan: telemetry skipped: ' + e)
+// Run stats for eval/analyze.sh — they ride in the return value, which the harness writes to the workflow
+// journal (~/.claude/projects/*/*/workflows/wf_*.json) together with per-seat model/tokens/duration and
+// status. That journal replaced the sonnet telemetry seat (0.5.0): same data, no heredoc relay, no write.
+// claims = bullet / numbered / bold-numbered (**A1.**) / ###-heading lines: the survival-per-claim
+// denominator (Goodhart guard). The old bullet-only regex counted 0 for a generalist writing **A1.**.
+const claims = (t) => String(t).split('\n').filter((l) => /^\s*([-*•]\s|\d+[.)]\s|\*\*[A-Z]?\d+[.)]?|#{3,6}\s)/.test(l)).length
+const stats = {
+  arm: (duo ? 'duo' : 'full') + (mergedSynth ? '-merged' : ''),
+  gpt_ran: gptRan, gpt_retried: gptRetried, codexModel, codexEffort,
+  seats: answers.map((a) => ({ panelist: a.panelist, chars: String(a.analysis).length, claims: claims(a.analysis) })),
+  subject_head: String(task).slice(0, 200),
 }
-
-return { plan, judge, coverage, panel: ran, contextInjected: ctx !== '(no extra context resolved)' }
+return { plan, judge, coverage, panel: ran, contextInjected: ctx !== '(no extra context resolved)', stats }

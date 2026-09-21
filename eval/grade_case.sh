@@ -4,12 +4,11 @@
 #  - recall: truth match_regex first, sonnet FOUND/MISSED semantic fallback
 #  - findings: truth-match = TP; EVERYTHING else (decoy-cited included) goes to the audit pile —
 #    §3 MAJOR#8: no auto-FP by decoy citation; the pilot hand-audit (§3 MINOR#10) settles FP counts
-#  - miss attribution (council arms): telemetry judge JSON via run_id → PANEL|JUDGE|SYNTH (§3 MINOR#9:
+#  - miss attribution (council arms): workflow-journal judge JSON via runId → PANEL|JUDGE|SYNTH (§3 MINOR#9:
 #    semantic check, not regex-over-raw-answers)
 # Appends one row to eval/results/grades.jsonl.
 set -euo pipefail
 E="$(cd "$(dirname "$0")" && pwd)"
-TEL="$HOME/.fusion-council/telemetry.jsonl"
 CASE=${1:?case id}; ARM=${2:?arm}
 CJ="$E/cases/$CASE/case.json"
 ROW=$(jq -c --arg c "$CASE" --arg a "$ARM" 'select(.case==$c and .arm==$a)' "$E/results/bench.jsonl" | tail -1)
@@ -40,10 +39,11 @@ Did the review identify THIS specific bug — same root cause AND same code loca
   # miss attribution — only meaningful when a council judge row exists
   RID=$(printf '%s' "$ROW" | jq -r '.run_id // empty')
   if [ "$found" = false ] && [ -n "$RID" ]; then
-    J=$(jq -c --arg r "$RID" 'select(.run_id==$r) | .judge' "$TEL" | tail -1)
+    JF=$("$E/journal.sh" by-id "$RID" || true)
+    J=$([ -n "$JF" ] && jq -c '.result.judge' "$JF" || true)
     if [ -n "$J" ] && [ "$J" != null ]; then
       A=$(ask "TRUTH: a seeded bug — ${DESC} — at ${TF}:${TL}. The final review MISSED it.
-JUDGE JSON (per-list, entries are '<panelist>: <claim>' capped at 500 chars):
+JUDGE JSON (per-list, entries are '<panelist>: <claim>'):
 ${J}
 
 Where was it lost? Answer with exactly one word:

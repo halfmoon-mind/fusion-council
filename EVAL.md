@@ -145,6 +145,13 @@ Cost frame used throughout: one council run ≈ 3–4 Opus role seats + Opus jud
 
 ## A) Observational telemetry (free; runs on real usage)
 
+> **SUPERSEDED 2026-09-21 (0.5.0).** The append seat described in A1 is removed; the Claude Code workflow
+> journal (`~/.claude/projects/*/*/workflows/wf_*.json`) already records the full return value plus wall
+> time, tokens, per-seat model/tokens and status. `eval/analyze.sh` now reads those journals (schema A2
+> lives on as `result.stats` + `result.judge`); A1 below is kept as the record of why the relay design
+> existed and what it cost (~33k tokens / ~40s per run, and — journals showed — always on Opus because a
+> global `CLAUDE_CODE_SUBAGENT_MODEL=opus` overrode the seat's `model: 'sonnet'`).
+
 ### A1. Where the append goes — IMPLEMENTED 2026-07-02 (fallback path)
 
 The primary design (direct `node:fs` append from the script) is **dead**: a probe workflow confirmed the runtime blocks `import()` entirely, exposes no `process`, and statically rejects `new Date()`. So the shipped implementation is the fallback, now live in both workflows immediately before their final `return`:

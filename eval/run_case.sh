@@ -8,7 +8,6 @@ set -euo pipefail
 E="$(cd "$(dirname "$0")" && pwd)"
 ROOT="$(dirname "$E")"
 WF="$ROOT/workflows/fusion-review.js"
-TEL="$HOME/.fusion-council/telemetry.jsonl"
 CASE=${1:?case id}; ARM=${2:?arm}
 CJ="$E/cases/$CASE/case.json"
 [ -f "$CJ" ] || { echo "no case $CJ" >&2; exit 1; }
@@ -91,17 +90,17 @@ $REVS" sonnet)
   COST=$(printf '%s' "$ENV" | jq -r '.total_cost_usd // 0')
   [ "$ARM" = solo-k ] && COST=$(echo "$COST + $COST_K" | bc)
 
-  # §3 MAJOR#7 + ablation-integrity assert: join the council telemetry row on cwd and require BOTH
+  # §3 MAJOR#7 + ablation-integrity assert: join the run's workflow journal (eval/journal.sh) and require BOTH
   # (a) the workflow actually ran the REQUESTED arm (catches args silently dropped/stringified — this
   # exact failure corrupted the first pilot: every nogpt/duo run silently executed as full), and
   # (b) for full/duo, that the GPT seat really ran. Violation → rerun (≤3 attempts), else excluded.
   if [ "$ARM" = full ] || [ "$ARM" = duo ] || [ "$ARM" = duo-merged ] || [ "$ARM" = nogpt ]; then
-    ROW=$(jq -c --arg w "$W" 'select(.cwd == $w or .cwd == ("/private" + $w))' "$TEL" 2>/dev/null | tail -1)
-    gpt_ran=$(printf '%s' "$ROW" | jq -r '.gpt_ran // false')
-    run_id=$(printf '%s' "$ROW" | jq -r '.run_id // null')
-    tel_arm=$(printf '%s' "$ROW" | jq -r '.arm // "none"')
+    J=$("$E/journal.sh" latest "$W" fusion-review || true)
+    gpt_ran=$([ -n "$J" ] && jq -r '.result.stats.gpt_ran // ((.result.panel // []) | any(startswith("gpt-")))' "$J" || echo false)
+    run_id=$([ -n "$J" ] && jq -r '.runId // null' "$J" || echo null)
+    tel_arm=$([ -n "$J" ] && jq -r '.result.stats.arm // "none"' "$J" || echo none)
     bad=""
-    [ "$tel_arm" != "$ARM" ] && bad="telemetry arm=$tel_arm != requested $ARM"
+    [ "$tel_arm" != "$ARM" ] && bad="journal arm=$tel_arm != requested $ARM"
     if [ -z "$bad" ] && { [ "$ARM" = full ] || [ "$ARM" = duo ] || [ "$ARM" = duo-merged ]; } && [ "$gpt_ran" != true ]; then
       bad="gpt_ran=$gpt_ran"
     fi

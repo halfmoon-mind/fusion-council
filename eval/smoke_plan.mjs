@@ -36,15 +36,17 @@ async function run(args) {
 }
 
 {
-  const { calls, result } = await run({ task: 'do a thing', noTelemetry: true })
+  const { calls, result } = await run({ task: 'do a thing' })
   const labels = calls.map((c) => c.label)
   assert(labels.includes('judge+synthesize'), 'default: judge+synthesize seat ran')
   assert(!labels.includes('judge') && !labels.includes('synthesize'), 'default: split seats did not run')
   assert.equal(result.plan, '# Fusion Plan (merged stub)', 'default: plan comes from the plan field')
-  assert(!('plan' in result.judge), 'default: plan stripped from the judge object (telemetry shape)')
+  assert(!('plan' in result.judge), 'default: plan stripped from the judge object (journal shape)')
+  assert.equal(result.stats.arm, 'full-merged', 'default: stats.arm records the actual configuration')
+  assert.equal(result.stats.seats.length, 5, 'default: stats.seats lists every panelist that answered')
 }
 {
-  const { calls, result } = await run({ task: 'do a thing', splitSynth: true, noTelemetry: true })
+  const { calls, result } = await run({ task: 'do a thing', splitSynth: true })
   const labels = calls.map((c) => c.label)
   assert(labels.includes('judge') && labels.includes('synthesize'), 'split: both seats ran')
   assert(!labels.includes('judge+synthesize'), 'split: merged seat did not run')
@@ -52,8 +54,8 @@ async function run(args) {
 }
 {
   // args.task is mandatory and the string-args normalization must still reach it
-  const { result } = await run('{"task":"json-encoded args","noTelemetry":true}')
+  const { result } = await run('{"task":"json-encoded args"}')
   assert.equal(result.plan, '# Fusion Plan (merged stub)', 'string args: JSON-encoded args normalized')
-  await assert.rejects(() => run({ noTelemetry: true }), /missing args.task/, 'missing task throws')
+  await assert.rejects(() => run({}), /missing args.task/, 'missing task throws')
 }
 console.log('smoke_plan OK')

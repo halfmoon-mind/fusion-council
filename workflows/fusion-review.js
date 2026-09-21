@@ -1,7 +1,7 @@
 export const meta = {
   name: 'fusion-review',
   description:
-    'Deterministic read-only review council: one generalist Claude seat + GPT-5.6 Sol review the working-tree diff, then one merged judge+synthesize call grounds the findings and writes one report (duo default; args.roles restores the Claude role panel, args.splitSynth the two-call judge→synthesize pipeline). Returns early if there is no diff. Appends run telemetry to ~/.fusion-council (disable: args.noTelemetry).',
+    'Deterministic read-only review council: one generalist Claude seat + GPT-5.6 Sol review the working-tree diff, then one merged judge+synthesize call grounds the findings and writes one report (duo default; args.roles restores the Claude role panel, args.splitSynth the two-call judge→synthesize pipeline). Returns early if there is no diff. Run stats (arm, seats, claim counts) travel in the returned `stats`, so the workflow journal is the telemetry.',
   whenToUse:
     'After implementing a non-trivial change, to vet the diff from multiple model families before merge. It reviews the current `git diff`; no args required — optional: roles:true restores the Claude role panel, noGpt drops the GPT seat, splitSynth:true the two-call judge→synthesize pipeline.',
   phases: [{ title: 'Capture' }, { title: 'Panel' }, { title: 'Judge' }, { title: 'Synthesize' }],
@@ -39,9 +39,6 @@ const duo = !roles
 // pipeline (the historical full/nogpt/duo bench arms send it); args.mergedSynth is legacy (it IS the
 // default), accepted as a no-op. Pre-registered reversion criteria live in EVAL.md §B0.
 const mergedSynth = !(A && A.splitSynth)
-// Disclosed side-effect gate: telemetry (EVAL.md §A) appends run stats to ~/.fusion-council — the ONE
-// write this otherwise read-only workflow performs. Pass noTelemetry:true for a strictly read-only run.
-const noTelemetry = !!(A && A.noTelemetry)
 
 const READ_ONLY =
   'You are in read-only deliberation mode. You MAY read files, but you MUST NOT create, modify, or ' +
@@ -345,63 +342,16 @@ if (mergedSynth) {
   )
 }
 
-// 4) Telemetry (observational eval, EVAL.md §A) — fail-open; must NEVER break or gate a run.
-// Same pattern as fusion-plan (see the fuller comment there): no fs/process/Date/timers in this runtime,
-// so ONE seat appends via QUOTED heredoc; SHELL supplies ts/cwd/run_id; `jq -e` guards WELL-FORMEDNESS
-// (not fidelity — the journal keeps ground truth); a failed copy appends a {dropped:true} stub so the
-// large-run drop bias stays measurable; bounded mkdir lock because bench arms run in parallel; one retry
-// on missing TELEMETRY_OK. Single-line JSON means a literal FUSION_TELEMETRY_EOF inside the data (e.g.
-// reviewing THIS file) can't terminate the heredoc. DESCRIPTIVE only — never a kill-metric input.
-if (!noTelemetry)
-try {
-  const cap = (v) => (Array.isArray(v) ? v.map((s) => String(s).slice(0, 500)) : v)
-  const row = JSON.stringify({
-    workflow: 'fusion-review',
-    // eval arm — joins bench runs to telemetry; records the ACTUAL configuration (default run = 'duo')
-    arm: (roles ? (noGpt ? 'nogpt' : 'full') : noGpt ? 'duo-nogpt' : 'duo') + (mergedSynth ? '-merged' : ''),
-    panel: ran,
-    gpt_ran: gptRan,
-    gpt_retried: gptRetried,
-    capture_retried: captureRetried, // relay-bail base rate (marker-less first reply), cf. gpt_retried
-    codexModel,
-    codexEffort,
-    judge: Object.fromEntries(Object.entries(judge).map(([k, v]) => [k, cap(v)])),
-    coverage,
-    seats: answers.map((a) => ({
-      panelist: a.panelist,
-      chars: String(a.analysis).length,
-      // bullet/numbered lines ≈ claim count: the survival-per-claim denominator (Goodhart guard)
-      claims: String(a.analysis)
-        .split('\n')
-        .filter((l) => /^\s*([-*•]|\d+[.)])\s/.test(l)).length,
-    })),
-    subject_head: String(d).slice(0, 200),
-  })
-  const send = () =>
-    agent(
-      `Append one telemetry row. Run this command verbatim. The heredoc body is ONE single line of JSON — ` +
-        `copy it EXACTLY, character-for-character, no reformatting:\n` +
-        `  F=$(mktemp); cat > "$F" <<'FUSION_TELEMETRY_EOF'\n` +
-        `${row}\n` +
-        `FUSION_TELEMETRY_EOF\n` +
-        `  D="$HOME/.fusion-council"; mkdir -p "$D"; RID="$(date -u +%s)-$$-$RANDOM"\n` +
-        `  for i in $(seq 1 50); do mkdir "$D/.lock" 2>/dev/null && break; sleep 0.1; done\n` +
-        `  if jq -e . "$F" >/dev/null 2>&1; then jq -c --arg ts "$(date -u +%FT%TZ)" --arg cwd "$PWD" ` +
-        `--arg rid "$RID" '. + {ts:$ts,cwd:$cwd,run_id:$rid}' "$F" >> "$D/telemetry.jsonl" && echo TELEMETRY_OK; ` +
-        `else jq -cn --arg ts "$(date -u +%FT%TZ)" --arg cwd "$PWD" --arg rid "$RID" ` +
-        `'{dropped:true,workflow:"fusion-review",ts:$ts,cwd:$cwd,run_id:$rid}' >> "$D/telemetry.jsonl"; ` +
-        `echo TELEMETRY_BAD; fi\n` +
-        `  rmdir "$D/.lock" 2>/dev/null; rm -f "$F"\n` +
-        `Return ONLY the command's final output line.`,
-      // mergedSynth never enters the Synthesize phase, so group telemetry under Judge there
-      { model: 'sonnet', phase: mergedSynth ? 'Judge' : 'Synthesize', label: 'telemetry' }
-    )
-  let ack = await send()
-  if (!/TELEMETRY_OK/.test(String(ack))) ack = await send()
-  if (!/TELEMETRY_OK/.test(String(ack)) && typeof log === 'function')
-    log('fusion-review: telemetry row dropped (seat did not confirm a valid append)')
-} catch (e) {
-  if (typeof log === 'function') log('fusion-review: telemetry skipped: ' + e)
+// Run stats for eval/analyze.sh — they ride in the return value, which the harness writes to the workflow
+// journal (~/.claude/projects/*/*/workflows/wf_*.json) together with per-seat model/tokens/duration and
+// status. That journal replaced the sonnet telemetry seat (0.5.0): same data, no heredoc relay, no write.
+// claims = bullet / numbered / bold-numbered (**A1.**) / ###-heading lines: the survival-per-claim
+// denominator (Goodhart guard). The old bullet-only regex counted 0 for a generalist writing **A1.**.
+const claims = (t) => String(t).split('\n').filter((l) => /^\s*([-*•]\s|\d+[.)]\s|\*\*[A-Z]?\d+[.)]?|#{3,6}\s)/.test(l)).length
+const stats = {
+  arm: (roles ? (noGpt ? 'nogpt' : 'full') : noGpt ? 'duo-nogpt' : 'duo') + (mergedSynth ? '-merged' : ''),
+  gpt_ran: gptRan, gpt_retried: gptRetried, capture_retried: captureRetried, codexModel, codexEffort,
+  seats: answers.map((a) => ({ panelist: a.panelist, chars: String(a.analysis).length, claims: claims(a.analysis) })),
+  subject_head: String(d).slice(0, 200),
 }
-
-return { review, judge, coverage, panel: ran }
+return { review, judge, coverage, panel: ran, stats }

@@ -60,15 +60,18 @@ CLI just shows up as UNAVAILABLE in Council Coverage.
 
 ## Telemetry & self-evaluation
 
-Each run appends one compact stats row (the judge JSON, per-seat claim counts,
-coverage — never full seat answers) to `~/.fusion-council/telemetry.jsonl`, so the
-council's own value is measurable from real usage: per-seat surviving insights,
-FP rate, cross-family agreement, and whether you actually acted on the output
-(`eval/ack.sh y|n`). `eval/analyze.sh` prints the scoreboard. This is the ONE
-write the otherwise read-only workflows perform — pass `noTelemetry: true` to
-disable it. The full validation methodology (verified literature, seeded-bug
-benchmark design, ablation arms `noGpt`/`roles`, kill metrics, and the §B5′
-re-validation that made duo the review default) lives in `EVAL.md`.
+The council writes nothing. Claude Code journals every Workflow run at
+`~/.claude/projects/<project>/<session>/workflows/wf_*.json` — the returned `judge`,
+`panel`, `coverage` and `stats` (arm, per-seat claim counts, GPT ran/retried) plus
+what the plugin itself could never record: wall time, total tokens, per-seat model and
+tokens, and killed/failed status. `eval/analyze.sh` reads those journals and prints
+the scoreboard (`--bench` includes scratch-repo bench runs; `eval/journal.sh` looks a
+run up by cwd or runId). Until 0.4.0 a sonnet seat appended a subset of this to
+`~/.fusion-council/telemetry.jsonl` through a heredoc relay; that seat cost ~33k
+tokens and ~40s per run and was removed in 0.5.0 (`args.noTelemetry` is now a no-op).
+The full validation methodology (verified literature, seeded-bug benchmark design,
+ablation arms `noGpt`/`roles`, kill metrics, and the §B5′ re-validation that made duo
+the review default) lives in `EVAL.md`.
 
 ## Layout
 
@@ -78,9 +81,10 @@ re-validation that made duo the review default) lives in `EVAL.md`.
 agents/                           5 read-only role agents (Read/Glob/Grep only)
 skills/fusion-plan, fusion-review entry points (call the workflows by path)
 workflows/*.js                    the orchestration (bundled; called via ${CLAUDE_PLUGIN_ROOT})
-EVAL.md, eval/                    validation methodology + telemetry scoreboard scripts
+EVAL.md, eval/                    validation methodology + journal scoreboard scripts
 ```
 
-Workflows aren't an auto-loaded plugin component, so the skills invoke them by
-`scriptPath` under `${CLAUDE_PLUGIN_ROOT}` — they ship as bundled data, not as a
-registered-by-name workflow.
+Current Claude Code registers plugin workflows by name: real sessions launch
+`Workflow({ name: "fusion-council:fusion-review" })` and the skill text shown to the
+model is the workflow's own `meta`, not `skills/*/SKILL.md`. The `skills/` entries stay
+as the documented contract and as the `scriptPath` fallback for older harnesses.
