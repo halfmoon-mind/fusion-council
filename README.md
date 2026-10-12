@@ -6,19 +6,19 @@ Two deterministic, read-only **councils** for Claude Code that vet your work wit
 more than one model family before you commit to it:
 
 - **`/fusion-council:fusion-plan <task>`** — before a non-trivial change. A Claude
-  role panel (architect · skeptic · test-strategist · maintainer) plus **GPT-5.6 Sol**
+  role panel (architect · skeptic · test-strategist · maintainer) plus **GPT Sol**
   deliberate in parallel; one merged judge+synthesize call compares them on merit and
   writes the plan from its own verdict. Since v0.4.0 this is the same one-call shape
   `fusion-review` has run since v0.3.0, ported on that arm's bench result — the plan
   council itself is unbenched (`EVAL.md` §B0); `args: { splitSynth: true }` restores
   the two-call pipeline.
 - **`/fusion-council:fusion-review`** — after the change. One generalist Claude seat
-  plus **GPT-5.6 Sol** review your current `git diff`, judged and synthesized → one
+  plus **GPT Sol** review your current `git diff`, judged and synthesized → one
   findings report. This duo is the bench-validated default (matched recall on the
   settled case set — n=1 hard case, so recall deltas are anecdote — at ~half the
   clean-diff noise and −21% cost; `EVAL.md` §B5′); pass
   `args: { roles: true }` to restore the role panel (skeptic · test-strategist ·
-  maintainer + GPT-5.6 Sol). Since v0.3.0 the judge and the report writer are **one
+  maintainer + GPT Sol). Since v0.3.0 the judge and the report writer are **one
   call**: the same seat that grounds and gates the panel's claims writes the final
   report from its own verdict, which removes the judge→synthesizer handoff both
   measured information-loss bugs lived in. A same-era bench pass tied recall (5/5
@@ -47,13 +47,15 @@ Local testing without GitHub: point the marketplace at this directory directly
 /fusion-council:fusion-review
 ```
 
-## The GPT-5.6 Sol seat (optional)
+## The GPT Sol seat (optional)
 
 The non-Claude panel seat shells out to the local **Codex CLI** (`codex exec`,
 ChatGPT subscription — no metered API). If `codex` isn't installed — or a run fails
 or times out — that seat drops out and the council runs Claude-only; every report's
 **Council Coverage** line says so, so reduced diversity is never silent. Install
-Codex CLI to enable it. The seat hands its prompt to `codex exec` on **stdin**
+Codex CLI to enable it. It runs the newest `gpt-*-sol` in Codex's model list
+(`~/.codex/models_cache.json`, resolved per run, falling back to `gpt-6.1-sol`;
+`args.codexModel` pins one). The seat hands its prompt to `codex exec` on **stdin**
 (the `-` / piped form, so large tasks/diffs aren't capped by `ARG_MAX`), which
 needs a Codex CLI recent enough to support it (verified on v0.142.0); an older
 CLI just shows up as UNAVAILABLE in Council Coverage.

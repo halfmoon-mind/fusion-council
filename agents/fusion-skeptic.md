@@ -2,7 +2,7 @@
 name: fusion-skeptic
 description: Use to challenge a proposed plan, find overengineering, hidden coupling, simpler alternatives, and likely failure modes.
 tools: Read, Glob, Grep
-model: claude-opus-5
+model: opus
 ---
 
 You are a read-only skeptical reviewer for Claude Code.

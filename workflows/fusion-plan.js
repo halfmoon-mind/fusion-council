@@ -1,7 +1,7 @@
 export const meta = {
   name: 'fusion-plan',
   description:
-    'Deterministic read-only planning council: Claude role panel (architect/skeptic/test/maintainer) + GPT-5.6 Sol, then one merged judge+synthesize call grounds the analyses and writes one implementation plan (args.splitSynth restores the two-call judge→synthesize pipeline). Every invocation runs the full pipeline — no skip gate. Run stats (arm, seats, claim counts) travel in the returned `stats`, so the workflow journal is the telemetry.',
+    'Deterministic read-only planning council: Claude role panel (architect/skeptic/test/maintainer) + GPT Sol, then one merged judge+synthesize call grounds the analyses and writes one implementation plan (args.splitSynth restores the two-call judge→synthesize pipeline). Every invocation runs the full pipeline — no skip gate. Run stats (arm, seats, claim counts) travel in the returned `stats`, so the workflow journal is the telemetry.',
   whenToUse:
     'Before a non-trivial change you choose to vet: architecture decisions, refactors, risky/multi-file edits, unclear bugs. Pass {task}. YOU decide when to run it; it always runs everything — optional: splitSynth:true restores the two-call judge→synthesize pipeline.',
   phases: [{ title: 'Context' }, { title: 'Panel' }, { title: 'Judge' }, { title: 'Synthesize' }],
@@ -22,7 +22,7 @@ if (!task || !String(task).trim()) {
   throw new Error('fusion-plan: missing args.task (pass the change you want planned)')
 }
 
-// GPT-5.6 Sol = the ONLY non-Claude diversity axis, so it's a MANDATORY panel seat (always in PANEL below).
+// GPT Sol = the ONLY non-Claude diversity axis, so it's a MANDATORY panel seat (always in PANEL below).
 // ONE seat (not N "role-lens" seats) with a two-section prompt (recommend + risks): splitting GPT into
 // multiple seats adds ZERO model-family diversity (same model), and two GPT answers agreeing would read as
 // "cross-model consensus" to the family-blind judge — shielding a shared GPT error from the single-source
@@ -30,7 +30,13 @@ if (!task || !String(task).trim()) {
 // gpt-5.6-sol verified working on this ChatGPT sub at 'high' and 'xhigh' effort (2026-07); 'high' = near-xhigh
 // quality but ~1.6x faster on long tasks (A/B measured on gpt-5.5, not re-run on 5.6), so it's the default;
 // pass codexEffort:'xhigh' for the hardest, 'low' for raw speed.
-const codexModel = (A && A.codexModel) || 'gpt-5.6-sol'
+const codexModel = (A && A.codexModel) || 'sol-latest'
+// 'sol-latest' = the newest gpt-<ver>-sol in Codex's own per-account model list (~/.codex/models_cache.json,
+// refreshed by the CLI), resolved in the seat's shell at run time, so a new Sol release needs no edit here.
+// Falls back to gpt-6.1-sol if the cache or jq is missing. args.codexModel pins an exact model instead.
+const codexModelSh = codexModel === 'sol-latest'
+  ? `"$(jq -er '[.models[].slug|select(test("^gpt-[0-9.]+-sol$"))]|max_by(ltrimstr("gpt-")|rtrimstr("-sol")|split(".")|map(tonumber))' ~/.codex/models_cache.json 2>/dev/null || echo gpt-6.1-sol)"`
+  : codexModel
 const codexEffort = (A && A.codexEffort) || 'high'
 const noContext = !!(A && A.noContext)
 // Eval ablation arm (EVAL.md §C) — default OFF, real usage unaffected. duo = ONE generalist Claude seat
@@ -78,7 +84,7 @@ const MERGED_SCHEMA = {
   properties: { ...JUDGE_SCHEMA.properties, plan: { type: 'string' } },
 }
 
-// GPT-5.6 Sol via local Codex CLI (ChatGPT sub, no metered API). -s read-only = it cannot edit.
+// GPT Sol via local Codex CLI (ChatGPT sub, no metered API). -s read-only = it cannot edit.
 // Input via QUOTED heredoc (<<'EOF') -> temp file -> fed to codex on STDIN (`- <"$PIN"`): the heredoc does
 // no interpolation, so $ / backticks / quotes in the task or context can't break the command (the old
 // inline "<prompt>" arg could). Reading the prompt from stdin instead of argv ALSO removes the ~1MB ARG_MAX
@@ -90,7 +96,7 @@ const MERGED_SCHEMA = {
 const CODEX_FAIL = 'CODEX_UNAVAILABLE'
 const codexRun = (prompt) => () =>
   agent(
-    `You drive the local Codex CLI to get GPT-5.6 Sol's analysis of a planning task. Do TWO steps in order; ` +
+    `You drive the local Codex CLI to get GPT Sol's analysis of a planning task. Do TWO steps in order; ` +
       `do NOT skip step 1.\n` +
       `STEP 1 — run this command verbatim BEFORE writing anything. It is read-only. Copy everything after ` +
       `"PROMPT:" below verbatim between the heredoc markers (a QUOTED heredoc, so the shell does NOT ` +
@@ -98,7 +104,7 @@ const codexRun = (prompt) => () =>
       `  PIN=$(mktemp); cat > "$PIN" <<'FUSION_PROMPT_EOF'\n` +
       `<the entire PROMPT block below, verbatim>\n` +
       `FUSION_PROMPT_EOF\n` +
-      `  OUT=$(mktemp); codex exec -s read-only --skip-git-repo-check -m ${codexModel} ` +
+      `  OUT=$(mktemp); codex exec -s read-only --skip-git-repo-check -m ${codexModelSh} ` +
       `-c model_reasoning_effort="${codexEffort}" -o "$OUT" - <"$PIN"; cat "$OUT"; rm -f "$OUT" "$PIN"\n` +
       `STEP 2 — return ONLY Codex's final answer from step 1's ACTUAL stdout, verbatim, no preamble of your ` +
       `own. Reply with EXACTLY the single token ${CODEX_FAIL} (and nothing else) ONLY IF the command you ran ` +
@@ -108,7 +114,7 @@ const codexRun = (prompt) => () =>
       `approach and how to verify; (B) RISKS — key risks, simpler alternatives, and what NOT to do.\n\n` +
       `PROMPT:\n${prompt}`,
     // sonnet, not the inherited Opus: this seat only shells out to codex and returns its output
-    // verbatim — GPT-5.6 Sol does the reasoning. Same tier as the context:session Bash-runner below.
+    // verbatim — GPT Sol does the reasoning. Same tier as the context:session Bash-runner below.
     { model: 'sonnet', phase: 'Panel', label: `panel:gpt-${codexModel}` }
   )
 
@@ -126,7 +132,7 @@ const withCodexRetry = (thunk) => async () => {
   gptRetried = true
   // `log` is a host-injected workflow global; guard with typeof so a runtime that lacks it can't throw a
   // ReferenceError on this exact failure path and defeat the retry. (typeof on an undeclared name is safe.)
-  if (typeof log === 'function') log('fusion-plan: GPT-5.6 Sol seat returned CODEX_UNAVAILABLE — retrying once')
+  if (typeof log === 'function') log('fusion-plan: GPT Sol seat returned CODEX_UNAVAILABLE — retrying once')
   return thunk()
 }
 
@@ -172,7 +178,7 @@ const panelPrompt =
   `claim with [UNVERIFIED]. This does NOT apply to forward-looking recommendations about code that does ` +
   `not exist yet.`
 
-// 1) Panel — 4 Claude role seats (agentType loads each .md's role prompt + read-only tools) + GPT-5.6 Sol.
+// 1) Panel — 4 Claude role seats (agentType loads each .md's role prompt + read-only tools) + GPT Sol.
 //    All parallel; the judge needs them together, so a barrier here is correct.
 phase('Panel')
 const ROLES = duo ? [] : ['fusion-architect', 'fusion-skeptic', 'fusion-test-strategist', 'fusion-maintainer']
@@ -194,7 +200,7 @@ const PANEL = [
                 `\n\nGive TWO terse sections (a few bullets each, not prose): (A) RECOMMENDATION — ` +
                 `recommended approach and how to verify; (B) RISKS — key risks, simpler alternatives, ` +
                 `and what NOT to do.`,
-              { model: 'claude-opus-5', phase: 'Panel', label: 'panel:claude-generalist' }
+              { model: 'opus', phase: 'Panel', label: 'panel:claude-generalist' }
             ),
         },
       ]
@@ -214,7 +220,7 @@ if (!answers.length) throw new Error('fusion-plan: no panelist produced output')
 const ran = answers.map((a) => a.panelist)
 const gptRan = ran.some((l) => l.startsWith('gpt-'))
 // GPT failure is recorded, never silently swallowed and never an interactive gate (deterministic).
-const coverage = `Seats: ${ran.join(', ')}. GPT-5.6 Sol: ${
+const coverage = `Seats: ${ran.join(', ')}. GPT Sol: ${
   gptRan ? 'ran' : 'UNAVAILABLE — Claude-only this run, model diversity reduced'
 }.`
 
@@ -276,7 +282,7 @@ if (mergedSynth) {
       `FIRST fill the judge fields. ${JUDGE_TASK}\n\n` +
       `THEN fill \`plan\` in this SAME response, applying your own judge fields above exactly as a ` +
       `downstream synthesizer would: ${PLAN_TASK}`,
-    { schema: MERGED_SCHEMA, model: 'claude-opus-5', phase: 'Judge', label: 'judge+synthesize' }
+    { schema: MERGED_SCHEMA, model: 'opus', phase: 'Judge', label: 'judge+synthesize' }
   )
   // Typed, not truthy: a rest-spread over a raw string would ship character indices to telemetry as the
   // "judge" while plan lands undefined (same boundary bug class as the JSON-string args above).
@@ -290,7 +296,7 @@ if (mergedSynth) {
     READ_ONLY +
       `${panelPrompt}\n\nPanel analyses (JSON):\n${JSON.stringify(answers, null, 2)}\n\n` +
       JUDGE_TASK,
-    { schema: JUDGE_SCHEMA, model: 'claude-opus-5', phase: 'Judge', label: 'judge' }
+    { schema: JUDGE_SCHEMA, model: 'opus', phase: 'Judge', label: 'judge' }
   )
 
   // 3) Synthesize — one plan. Keep gold, drop invalidClaims, emit the fixed report. No implementation.
@@ -300,7 +306,7 @@ if (mergedSynth) {
       `${panelPrompt}\n\nPanel analyses (JSON):\n${JSON.stringify(answers)}\n\n` +
       `Judge (JSON):\n${JSON.stringify(judge)}\n\nCouncil coverage: ${coverage}\n\n` +
       PLAN_TASK,
-    { model: 'claude-opus-5', phase: 'Synthesize', label: 'synthesize' }
+    { model: 'opus', phase: 'Synthesize', label: 'synthesize' }
   )
 }
 

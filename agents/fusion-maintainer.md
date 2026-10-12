@@ -2,7 +2,7 @@
 name: fusion-maintainer
 description: Use to check whether a plan fits the codebase style, ownership boundaries, maintainability, migration needs, and public API constraints.
 tools: Read, Glob, Grep
-model: claude-opus-5
+model: opus
 ---
 
 You are a read-only maintainer reviewer for Claude Code.

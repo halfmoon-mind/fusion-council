@@ -1,7 +1,7 @@
 export const meta = {
   name: 'fusion-review',
   description:
-    'Deterministic read-only review council: one generalist Claude seat + GPT-5.6 Sol review the working-tree diff, then one merged judge+synthesize call grounds the findings and writes one report (duo default; args.roles restores the Claude role panel, args.splitSynth the two-call judge→synthesize pipeline). Returns early if there is no diff. Run stats (arm, seats, claim counts) travel in the returned `stats`, so the workflow journal is the telemetry.',
+    'Deterministic read-only review council: one generalist Claude seat + GPT Sol review the working-tree diff, then one merged judge+synthesize call grounds the findings and writes one report (duo default; args.roles restores the Claude role panel, args.splitSynth the two-call judge→synthesize pipeline). Returns early if there is no diff. Run stats (arm, seats, claim counts) travel in the returned `stats`, so the workflow journal is the telemetry.',
   whenToUse:
     'After implementing a non-trivial change, to vet the diff from multiple model families before merge. It reviews the current `git diff`; no args required — optional: roles:true restores the Claude role panel, noGpt drops the GPT seat, splitSynth:true the two-call judge→synthesize pipeline.',
   phases: [{ title: 'Capture' }, { title: 'Panel' }, { title: 'Judge' }, { title: 'Synthesize' }],
@@ -16,7 +16,13 @@ let A = args
 if (typeof A === 'string' && A.trim().startsWith('{')) {
   try { A = JSON.parse(A) } catch (e) { /* not JSON — leave as-is */ }
 }
-const codexModel = (A && A.codexModel) || 'gpt-5.6-sol'
+const codexModel = (A && A.codexModel) || 'sol-latest'
+// 'sol-latest' = the newest gpt-<ver>-sol in Codex's own per-account model list (~/.codex/models_cache.json,
+// refreshed by the CLI), resolved in the seat's shell at run time, so a new Sol release needs no edit here.
+// Falls back to gpt-6.1-sol if the cache or jq is missing. args.codexModel pins an exact model instead.
+const codexModelSh = codexModel === 'sol-latest'
+  ? `"$(jq -er '[.models[].slug|select(test("^gpt-[0-9.]+-sol$"))]|max_by(ltrimstr("gpt-")|rtrimstr("-sol")|split(".")|map(tonumber))' ~/.codex/models_cache.json 2>/dev/null || echo gpt-6.1-sol)"`
+  : codexModel
 // 'high' = near-xhigh quality but ~1.6x faster on long tasks (A/B measured on gpt-5.5, not re-run on 5.6); pass codexEffort:'xhigh' for the hardest.
 const codexEffort = (A && A.codexEffort) || 'high'
 // DEFAULT = DUO: one generalist Claude seat + GPT + the same judge/synthesize — the two mechanisms the
@@ -93,7 +99,7 @@ const MERGED_SCHEMA = {
 // embed `d`, haiku's copy of the SAME snapshot — so this stdin/ARG_MAX fix is the GPT seat only.) All seats
 // derive from the ONE capture, so there is no Capture-vs-Panel timing divergence and the GPT seat needs no
 // git/cwd of its own (verified: a temp file written by one subagent is readable by another, and an
-// end-to-end run reports "GPT-5.6 Sol: ran"). The `<"$F"` redirect also closes stdin at EOF, so codex can't hang
+// end-to-end run reports "GPT Sol: ran"). The `<"$F"` redirect also closes stdin at EOF, so codex can't hang
 // waiting for input ("Reading additional input from stdin...") on a backgrounded long xhigh run — the
 // property the old explicit </dev/null gave, now supplied by feeding the prompt file itself.
 // Failure sentinel (idiomatic here, cf. NO_DIFF): the seat returns this when codex didn't really run — or
@@ -102,7 +108,7 @@ const MERGED_SCHEMA = {
 const CODEX_FAIL = 'CODEX_UNAVAILABLE'
 const codexRun = (diffPath) => () =>
   agent(
-    `You drive the local Codex CLI to get GPT-5.6 Sol's review of a working-tree diff. Do TWO steps in order; ` +
+    `You drive the local Codex CLI to get GPT Sol's review of a working-tree diff. Do TWO steps in order; ` +
       `do NOT skip step 1.\n` +
       `STEP 1 — run this command verbatim BEFORE writing anything. It is read-only; the diff is ALREADY on ` +
       `disk so do NOT type it yourself (the shell reads it with cat). The heredoc body is the only fixed ` +
@@ -114,14 +120,14 @@ const codexRun = (diffPath) => () =>
       `DIFF:\n` +
       `FUSION_REVIEW_EOF\n` +
       `  cat '${diffPath}' >> "$F"\n` +
-      `  OUT=$(mktemp); codex exec -s read-only --skip-git-repo-check -m ${codexModel} ` +
+      `  OUT=$(mktemp); codex exec -s read-only --skip-git-repo-check -m ${codexModelSh} ` +
       `-c model_reasoning_effort="${codexEffort}" -o "$OUT" - <"$F"; cat "$OUT"; rm -f "$OUT" "$F" '${diffPath}'\n` +
       `STEP 2 — return ONLY Codex's final answer from step 1's ACTUAL stdout, verbatim, no preamble of your ` +
       `own. Reply with EXACTLY the single token ${CODEX_FAIL} (and nothing else) ONLY IF the command you ran ` +
       `produced no real answer — it errored, timed out, returned nothing, or printed only its banner / ` +
       `"Reading additional input from stdin...". Do NOT reply ${CODEX_FAIL} without running step 1.`,
     // sonnet, not the inherited Opus: this seat only shells out to codex and returns its output
-    // verbatim — GPT-5.6 Sol does the reasoning. Same tier as the capture:diff Bash-runner above.
+    // verbatim — GPT Sol does the reasoning. Same tier as the capture:diff Bash-runner above.
     { model: 'sonnet', phase: 'Panel', label: `panel:gpt-${codexModel}` }
   )
 
@@ -139,7 +145,7 @@ const withCodexRetry = (thunk) => async () => {
   gptRetried = true
   // `log` is a host-injected workflow global; guard with typeof so a runtime that lacks it can't throw a
   // ReferenceError on this exact failure path and defeat the retry. (typeof on an undeclared name is safe.)
-  if (typeof log === 'function') log('fusion-review: GPT-5.6 Sol seat returned CODEX_UNAVAILABLE — retrying once')
+  if (typeof log === 'function') log('fusion-review: GPT Sol seat returned CODEX_UNAVAILABLE — retrying once')
   return thunk()
 }
 
@@ -198,7 +204,7 @@ const d = raw.slice(pm.index + pm[0].length).trim() // diff follows the marker l
 
 const panelPrompt = `${REVIEW_FRAMING}\n\nDIFF:\n${d}`
 
-// 1) Panel — 3 Claude reviewer roles (architect is for planning, not review) + GPT-5.6 Sol. All parallel.
+// 1) Panel — 3 Claude reviewer roles (architect is for planning, not review) + GPT Sol. All parallel.
 phase('Panel')
 const ROLES = duo ? [] : ['fusion-skeptic', 'fusion-test-strategist', 'fusion-maintainer']
 const PANEL = [
@@ -219,7 +225,7 @@ const PANEL = [
                 panelPrompt +
                 `\n\nReport in TWO sections: (A) CORRECTNESS — regression risks, hidden coupling, ` +
                 `overengineering; (B) TESTS & SCOPE — missing tests and out-of-scope changes.`,
-              { model: 'claude-opus-5', phase: 'Panel', label: 'panel:claude-generalist' }
+              { model: 'opus', phase: 'Panel', label: 'panel:claude-generalist' }
             ),
         },
       ]
@@ -238,7 +244,7 @@ if (!answers.length) throw new Error('fusion-review: no panelist produced output
 
 const ran = answers.map((a) => a.panelist)
 const gptRan = ran.some((l) => l.startsWith('gpt-'))
-const coverage = `Seats: ${ran.join(', ')}. GPT-5.6 Sol: ${
+const coverage = `Seats: ${ran.join(', ')}. GPT Sol: ${
   gptRan ? 'ran' : 'UNAVAILABLE — Claude-only this run, model diversity reduced'
 }.`
 
@@ -313,7 +319,7 @@ if (mergedSynth) {
       `FIRST fill the judge fields. ${JUDGE_TASK}\n\n` +
       `THEN fill \`report\` in this SAME response, applying your own judge fields above exactly as a ` +
       `downstream synthesizer would: ${REPORT_TASK}`,
-    { schema: MERGED_SCHEMA, model: 'claude-opus-5', phase: 'Judge', label: 'judge+synthesize' }
+    { schema: MERGED_SCHEMA, model: 'opus', phase: 'Judge', label: 'judge+synthesize' }
   )
   // Typed, not truthy: this runtime boundary already produced a string-where-object-expected bug once
   // (the JSON-string args normalization above), and a rest-spread over a raw string would ship character
@@ -328,7 +334,7 @@ if (mergedSynth) {
     READ_ONLY +
       `${panelPrompt}\n\nReviewer findings (JSON):\n${JSON.stringify(answers, null, 2)}\n\n` +
       JUDGE_TASK,
-    { schema: JUDGE_SCHEMA, model: 'claude-opus-5', phase: 'Judge', label: 'judge' }
+    { schema: JUDGE_SCHEMA, model: 'opus', phase: 'Judge', label: 'judge' }
   )
 
   // 3) Synthesize — one findings report. Keep real issues, drop invalidClaims.
@@ -338,7 +344,7 @@ if (mergedSynth) {
       `${panelPrompt}\n\nReviewer findings (JSON):\n${JSON.stringify(answers)}\n\n` +
       `Judge (JSON):\n${JSON.stringify(judge)}\n\nCouncil coverage: ${coverage}\n\n` +
       REPORT_TASK,
-    { model: 'claude-opus-5', phase: 'Synthesize', label: 'synthesize' }
+    { model: 'opus', phase: 'Synthesize', label: 'synthesize' }
   )
 }
 

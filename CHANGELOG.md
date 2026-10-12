@@ -1,5 +1,21 @@
 # Changelog
 
+## 0.6.0
+
+Both council axes now follow the newest model instead of a hard pin; no pipeline or panel changes.
+
+- **Change: GPT seat defaults to the newest Sol** (`codexModel: 'sol-latest'`, was `gpt-5.6-sol`). The
+  seat's shell picks the highest `gpt-<ver>-sol` from Codex's per-account model list
+  (`~/.codex/models_cache.json`, refreshed by the CLI) at run time — `gpt-6.1-sol` today, verified live on
+  the ChatGPT-sub Codex CLI (v0.159.2) at `high`. Falls back to `gpt-6.1-sol` if the cache or `jq` is
+  missing. `args.codexModel` still pins an exact model per run. Journal `stats.codexModel` records
+  `sol-latest`, not the resolved version.
+- **Change: Claude seats back on the `opus` alias** (was `claude-opus-5`, already a generation behind:
+  the alias resolves to `claude-opus-5-5`). Same 12 spots as 0.2.1 — judge/synthesize/generalist seats
+  in both workflows and the 4 role-agent frontmatters. Caveat from 0.2.1 still applies: right after a
+  release the alias can lag until Claude Code is updated. The journal records the model that ran.
+- **Docs:** README / SKILL.md / plugin manifests / workflow meta say "GPT Sol" instead of "GPT-5.6 Sol".
+
 ## 0.5.0
 
 The telemetry seat is gone; the workflow journal is the telemetry. Motivating measurement (2026-09-21,
